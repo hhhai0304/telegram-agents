@@ -57,7 +57,7 @@ const api = http.createServer((req, res) => {
       if (cursor < script.length && footers >= promptsServed) {
         const s = script[cursor++];
         if (!s.text.startsWith('/')) promptsServed++;
-        return reply([{ update_id: updateId++, message: { message_id: msgId++, chat: { id: Number(CHAT) }, text: s.text } }]);
+        return reply([{ update_id: updateId++, message: { message_id: msgId++, chat: { id: Number(CHAT) }, from: { id: Number(CHAT) }, text: s.text } }]);
       }
       if (cursor < script.length) return setTimeout(() => reply([]), 100);
       if (!finished.settled) { finished.settled = true; setTimeout(done, 1500); }
@@ -82,6 +82,11 @@ const api = http.createServer((req, res) => {
       PATH: `${fakebin}:${process.env.PATH}`,
       TG_BOT_TOKEN: 'fake:token',
       TGA_ALLOWED_CHAT_IDS: CHAT,
+      // bot.js also reads the real config.env next to it, so anything this test
+      // does not pin leaks in from the live install. Access control has to be
+      // pinned explicitly or a TGA_ALLOWED_USER_IDS there blocks the whole
+      // scripted conversation. (Same trap as TGA_KILO_BIN below.)
+      TGA_ALLOWED_USER_IDS: '',
       TGA_TELEGRAM_API: `http://127.0.0.1:${port}`,
       TGA_DATA_DIR: dataDir,
       TGA_APPROVE_PORT: String(20000 + Math.floor(Math.random() * 20000)),
@@ -163,9 +168,10 @@ const api = http.createServer((req, res) => {
     const t = texts.filter((x) => /^🧠 Claude Code\n/.test(x)).pop();
     assert.ok(t && /session: \(new\)/.test(t) && /sonnet · 🎚 high/.test(t), t);
   });
-  test('state.json is per-agent (v3)', () => {
+  test('state.json is per-agent and topic-aware (v4)', () => {
     const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8'));
-    assert.strictEqual(st.v, 3);
+    assert.strictEqual(st.v, 4);
+    assert.deepStrictEqual(st.topics, {});
     const c = st.chats[CHAT];
     assert.strictEqual(c.agent, 'claude');
     assert.strictEqual(c.per.opencode.sessionId, 'ses_fake01');

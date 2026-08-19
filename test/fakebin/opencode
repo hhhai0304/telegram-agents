@@ -6,5 +6,11 @@ const sess = args.includes('--session') ? args[args.indexOf('--session') + 1] : 
 const out = (o) => process.stdout.write(JSON.stringify({ sessionID: sess, ...o }) + '\n');
 out({ type: 'step_start', part: {} });
 out({ type: 'tool_use', part: { id: 't1', tool: 'bash', state: { status: 'completed', input: { command: 'rm -rf /tmp/x' } } } });
-out({ type: 'text', part: { text: `fake-opencode says: ${prompt} (args: ${args.join(' ')})` } });
-out({ type: 'step_finish', part: { cost: 0.001 } });
+// FAKE_DELAY_MS lets a test hold the process open long enough to observe two
+// topics running at the same time.
+const delay = Number(process.env.FAKE_DELAY_MS || 0);
+const finish = () => {
+  out({ type: 'text', part: { text: `fake-opencode says: ${prompt} (args: ${args.join(' ')})` } });
+  out({ type: 'step_finish', part: { cost: 0.001 } });
+};
+if (delay) setTimeout(finish, delay); else finish();

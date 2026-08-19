@@ -109,10 +109,71 @@ moved to 18792 so the two can coexist during the switch if you use different bot
 | `/stream` | `batch` (one message at the end) or `live` (as it goes) |
 | `/cd <path>` · `/pwd` | Change / show the working directory (resets every agent's session) |
 | `/approvals` | View and revoke "allow for this session" grants (Claude Code) |
+| `/topics` | List the topics of a forum group, with buttons to close, reopen or restore |
+| `/close` · `/drop` | In a topic: archive it, or delete it. The session survives either way |
+| `/rename <name>` | Rename the current topic |
 | `/stop` | Kill the running job |
 
 Switching agents while a job is queued does not reroute it: a message runs under the agent that
 was selected when you sent it.
+
+## Run several sessions at once
+
+One chat = one conversation, so a second message waits for the first. Want two things running
+side by side? Use a Telegram group with **Topics** on. **Each topic is its own session** — its own
+folder, agent and memory — and topics run at the same time.
+
+### Set it up once
+
+1. **BotFather → `/setprivacy` → Disable.** Do this first, or the bot cannot read your messages in
+   a group.
+2. Make a **new group** and add your bot.
+3. Group settings → turn **Topics** on.
+4. Group settings → **Administrators** → add your bot → tick **Manage Topics** and **Delete Messages**.
+5. Send any message in the group, then look at the bot's log for a line like
+   `Blocked unknown chat -1001234567890`. That number is your group id — put it in `config.env`:
+
+   ```
+   TGA_ALLOWED_CHAT_IDS=<your private chat id>,<the group id>
+   ```
+
+Restart the bot. Done.
+
+### Use it
+
+**General** is the control room. Everything else is a session.
+
+| In General | |
+|---|---|
+| `/new fix login` | opens a topic called "fix login" and starts a session there |
+| `/topics` | lists every topic, with buttons |
+
+| In a topic | |
+|---|---|
+| *(just type)* | talks to that session |
+| `/close` | done for now — stops what is running, keeps everything |
+| `/drop` | delete the topic, **the session is still saved** |
+| `/rename new name` | rename it |
+
+Deleted a topic and want it back? `/topics` in General → **♻️ Restore**. A new topic opens and the
+agent carries on where it left off.
+
+A new topic copies General's folder, agent and model. Change anything inside the topic and only
+that topic changes.
+
+### Keep it yours
+
+A group is a door: anyone in it can command the bot. Two things worth doing:
+
+- Don't create an invite link, and turn off **Add Members** in the group permissions.
+- Set `TGA_ALLOWED_USER_IDS` to your own id. Then even if someone does get in, the bot ignores
+  them completely.
+
+```
+TGA_ALLOWED_USER_IDS=<your id>
+```
+
+Leave it empty and anyone in the group can use the bot.
 
 ## The permission model
 
@@ -170,6 +231,8 @@ token out of the repo directory, `~/.config/telegram_secrets` is read as a secon
 |---|---|---|
 | `TG_BOT_TOKEN` | — | Bot token from @BotFather |
 | `TGA_ALLOWED_CHAT_IDS` | — | Comma-separated chat ids allowed to drive the bot |
+| `TGA_ALLOWED_USER_IDS` | empty | Comma-separated user ids allowed to drive it; empty = anyone in those chats |
+| `TGA_MAX_CONCURRENT` | `2` | Agents that may run at once; one topic still runs in order |
 | `TGA_AGENTS` | all | Which agents `/agent` offers: `claude,opencode,kilo,kiro` |
 | `TGA_AGENT` | `claude` | Agent a new chat starts with |
 | `TGA_<AGENT>_BIN` | — | Executable override, e.g. `TGA_CLAUDE_BIN=/home/me/.local/bin/claude` |

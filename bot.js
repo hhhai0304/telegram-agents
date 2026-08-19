@@ -27,6 +27,8 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const risk = require('./risk.js');
 const backends = require('./backends');
+const makeForum = require('./forum.js');
+const { keyOf, route, chatIdOf, threadOf, isTopic } = makeForum;
 
 // ---------------------------------------------------------------- config ---
 
@@ -69,6 +71,41 @@ const ALLOWED = new Set(
   (env('ALLOWED_CHAT_IDS', '') || process.env.TG_CHAT_ID || '')
     .split(',').map((s) => s.trim()).filter(Boolean)
 );
+/*
+ * A second, optional boundary: WHO may speak, on top of WHERE.
+ *
+ * In a private chat the two are the same thing (chat.id === from.id), so this
+ * is only interesting in a group: the group id is one allowed chat, but you may
+ * still want the bot to obey exactly one person in it.
+ *
+ * Empty (the default) = off, and the chat allowlist is the only gate — which is
+ * how this bot always behaved.
+ */
+const ALLOWED_USERS = new Set(
+  env('ALLOWED_USER_IDS', '').split(',').map((s) => s.trim()).filter(Boolean)
+);
+
+/**
+ * Who sent this update, for the ALLOWED_USERS check.
+ *
+ * Returns null when the sender is not a user at all: an anonymous group admin
+ * posts as `GroupAnonymousBot`, an automatically forwarded channel post as the
+ * channel. Both carry `sender_chat`, and neither is a person we can name — so
+ * they are refused whenever the filter is on, rather than being let through on
+ * a missing field.
+ */
+function senderId(obj) {
+  if (!obj || obj.sender_chat) return null;
+  return obj.from && obj.from.id !== undefined ? String(obj.from.id) : null;
+}
+
+/** True when this sender may drive the bot. Always true if the filter is off. */
+function userAllowed(obj) {
+  if (ALLOWED_USERS.size === 0) return true;
+  const id = senderId(obj);
+  return id !== null && ALLOWED_USERS.has(id);
+}
+
 if (!TOKEN) fatal('TG_BOT_TOKEN is missing — copy config.env.example to config.env and fill it in.');
 if (ALLOWED.size === 0) fatal('TGA_ALLOWED_CHAT_IDS is missing — put your chat id in config.env.');
 
@@ -93,6 +130,10 @@ const GUARD_MODE = env('GUARD_MODE', 'bymode');
 // Leave empty in config.env -> regenerated on every boot (recommended).
 const APPROVE_TOKEN = env('APPROVE_TOKEN', '') || crypto.randomBytes(24).toString('hex');
 const MAX_MSG = 3800;
+// How many agent processes may run at the same time. One conversation still
+// runs strictly in order; this only lets DIFFERENT topics overlap. Each running
+// agent is a full CLI process, so keep it in line with the machine's RAM.
+const MAX_CONCURRENT = Math.max(1, Number(env('MAX_CONCURRENT', 2)));
 
 const MODES = ['smart', 'ask', 'auto'];
 const STREAMS = ['batch', 'live'];
@@ -143,6 +184,14 @@ if (state.v !== 3) {
   state.v = 3;
 }
 
+// v4: forum topics. Conversations are keyed "<chatId>" or "<chatId>:<threadId>";
+// old keys are plain chat ids, which are already valid keys, so there is nothing
+// to rewrite — only the topic registry is new.
+if (state.v !== 4) {
+  state.topics = state.topics || {};
+  state.v = 4;
+}
+
 let saveTimer = null;
 function saveState() {
   if (saveTimer) return;
@@ -177,6 +226,10 @@ function agentState(cs, id = cs.agent) {
 }
 
 const backendOf = (cs) => backends.byId[cs.agent];
+
+// ------------------------------------------------------------------ forum ---
+
+const forum = makeForum({ tg: (...a) => tg(...a), state, saveState, log });
 
 /** "Allow for this session" grants: Map(sessionKey -> Set(signature)). In memory only. */
 const sessionGrants = new Map();
@@ -230,16 +283,19 @@ function chunk(text, size = MAX_MSG) {
 }
 
 /**
+ * `key` is a conversation key, not a bare chat id — route() turns it back into
+ * chat_id plus, for a forum topic, message_thread_id.
+ *
  * silent         — deliver without a notification (Telegram: disable_notification)
  * notifyOnlyLast — when a long reply is split, only the last chunk notifies
  */
-async function send(chatId, text, { silent = false, notifyOnlyLast = false, ...extra } = {}) {
+async function send(key, text, { silent = false, notifyOnlyLast = false, ...extra } = {}) {
   const parts = chunk(text).filter((p) => p.trim());
   let last = null;
   for (let i = 0; i < parts.length; i++) {
     const isLast = i === parts.length - 1;
     last = await tg('sendMessage', {
-      chat_id: chatId, text: parts[i], disable_web_page_preview: true,
+      ...route(key), text: parts[i], disable_web_page_preview: true,
       disable_notification: silent || (notifyOnlyLast && !isLast),
       ...extra,
     });
@@ -304,8 +360,9 @@ async function askApproval(chatId, payload, why) {
 
   // Flush whatever the agent has said before asking — otherwise whoever taps the
   // button has no context. Flush silently; let the approval message notify.
-  if (running && running.chatId === chatId && running.flushText) {
-    await running.flushText({ silent: true }).catch(() => {});
+  const rt = running.get(chatId);
+  if (rt && rt.flushText) {
+    await rt.flushText({ silent: true }).catch(() => {});
   }
 
   const id = String(++reqCounter);
@@ -321,7 +378,7 @@ async function askApproval(chatId, payload, why) {
   let msg;
   try {
     msg = await tg('sendMessage', {
-      chat_id: chatId,
+      ...route(chatId),
       text: chunk(text)[0],
       disable_web_page_preview: true,
       ...kb([
@@ -338,7 +395,7 @@ async function askApproval(chatId, payload, why) {
     const timer = setTimeout(() => {
       pendingApprovals.delete(id);
       tg('editMessageText', {
-        chat_id: chatId, message_id: msg.message_id,
+        chat_id: chatIdOf(chatId), message_id: msg.message_id,
         text: S.approvalTimedOut(toolName, detail.slice(0, 300)),
       }).catch(() => {});
       resolve({ decision: 'deny', reason: 'the owner did not answer in time' });
@@ -370,7 +427,7 @@ function startApprovalServer() {
         j.token.length === APPROVE_TOKEN.length &&
         crypto.timingSafeEqual(Buffer.from(j.token), Buffer.from(APPROVE_TOKEN));
       if (!ok) { res.writeHead(403).end('bad token'); return; }
-      if (!ALLOWED.has(String(j.chatId))) { res.writeHead(403).end('bad chat'); return; }
+      if (!ALLOWED.has(chatIdOf(j.chatId))) { res.writeHead(403).end('bad chat'); return; }
 
       let verdict;
       try { verdict = await askApproval(String(j.chatId), j.payload || {}, j.why); }
@@ -420,24 +477,38 @@ function listSessions(cs, limit) {
 
 // --------------------------------------------------------------- run job ---
 
-let running = null;
-let active = false;
+/**
+ * Jobs in flight, keyed by conversation key. One key never runs two jobs at
+ * once — replies would interleave inside the same topic and the session id
+ * would race — but different keys (different forum topics) do overlap, up to
+ * MAX_CONCURRENT.
+ */
+const running = new Map();   // key -> { child, chatId, statusMsgId, killedByUser, flushText, done }
 const queue = [];
-const busy = () => active || queue.length > 0;
+
+/** Is this conversation already working? Used only to say "queued". */
+const busy = (chatId) =>
+  running.has(chatId) || queue.some((j) => j.chatId === chatId);
 
 function enqueue(job) { queue.push(job); pump(); }
 
-async function pump() {
-  if (active || queue.length === 0) return;
-  active = true;
-  const job = queue.shift();
-  try { await runJob(job); }
-  catch (e) {
-    log('error', `job failed: ${e.stack || e.message}`);
-    try { await send(job.chatId, S.internalError(e.message)); } catch (_) {}
+function pump() {
+  while (running.size < MAX_CONCURRENT) {
+    // First job whose conversation is idle — skip the ones whose topic is busy
+    // instead of blocking the whole queue behind them.
+    const i = queue.findIndex((j) => !running.has(j.chatId));
+    if (i < 0) return;
+    const job = queue.splice(i, 1)[0];
+    // Claim the slot before any await, or two updates arriving together would
+    // both pass the findIndex check.
+    running.set(job.chatId, { chatId: job.chatId, killedByUser: false, claimed: true });
+    runJob(job)
+      .catch(async (e) => {
+        log('error', `job failed: ${e.stack || e.message}`);
+        try { await send(job.chatId, S.internalError(e.message)); } catch (_) {}
+      })
+      .finally(() => { running.delete(job.chatId); pump(); });
   }
-  active = false;
-  pump();
 }
 
 function toolLabel(name, input) {
@@ -519,10 +590,15 @@ async function runJob(job) {
   });
 
   const status = await tg('sendMessage', {
-    chat_id: chatId, text: S.working(sessionTag), disable_notification: true,
+    ...route(chatId), text: S.working(sessionTag), disable_notification: true,
   }).catch(() => null);
   const started = Date.now();
-  running = { child, chatId, statusMsgId: status ? status.message_id : null, killedByUser: false };
+  // pump() already claimed this key; fill the slot in with the live process so
+  // /stop and the approval gate can find it.
+  const rt = running.get(chatId) || { chatId, killedByUser: false };
+  rt.child = child;
+  rt.statusMsgId = status ? status.message_id : null;
+  running.set(chatId, rt);
 
   let lastStatusText = '', lastEdit = 0, toolCount = 0, currentTool = '';
   let sentAnything = false, stderr = '', finalResult = null;
@@ -531,13 +607,13 @@ async function runJob(job) {
   let notified = false;
 
   const refreshStatus = async () => {
-    if (!running || !running.statusMsgId) return;
+    if (rt.done || !rt.statusMsgId) return;
     const secs = Math.round((Date.now() - started) / 1000);
     const text = S.progress(sessionTag, secs, toolCount, currentTool);
     if (Date.now() - lastEdit < 3000 || text === lastStatusText) return;
     lastEdit = Date.now(); lastStatusText = text;
     try {
-      await tg('editMessageText', { chat_id: chatId, message_id: running.statusMsgId, text }, { retries: 0 });
+      await tg('editMessageText', { chat_id: chatIdOf(chatId), message_id: rt.statusMsgId, text }, { retries: 0 });
     } catch (_) {}
   };
   const ticker = setInterval(() => { refreshStatus().catch(() => {}); }, 3000);
@@ -569,7 +645,7 @@ async function runJob(job) {
         .catch((e) => log('warn', `send failed: ${e.message}`)));
     return sendChain;
   };
-  running.flushText = flushText;
+  rt.flushText = flushText;
 
   const sendOrdered = (text) => {
     notified = true;
@@ -619,9 +695,9 @@ async function runJob(job) {
   });
   try { parser.end(); } catch (e) { log('warn', `parser end: ${e.message}`); }
 
-  const killedByUser = running && running.killedByUser;
+  const killedByUser = rt.killedByUser;
   clearInterval(ticker); clearTimeout(timer);
-  running = null;
+  rt.done = true;
   await flushText().catch(() => {});   // flush the buffer — this one may notify
   await sendChain.catch(() => {});
 
@@ -666,13 +742,13 @@ async function runJob(job) {
   if (notified) {
     // The reply already notified -> edit the summary in place, silently.
     if (status) {
-      try { await tg('editMessageText', { chat_id: chatId, message_id: status.message_id, text: footer }); }
+      try { await tg('editMessageText', { chat_id: chatIdOf(chatId), message_id: status.message_id, text: footer }); }
       catch (_) { await send(chatId, footer, { silent: true }).catch(() => {}); }
     } else { await send(chatId, footer, { silent: true }).catch(() => {}); }
   } else {
     // Nothing notified all turn (the text was flushed early for an approval) ->
     // the summary is the "done" message and must notify. Drop the "⏳" bubble.
-    if (status) await tg('deleteMessage', { chat_id: chatId, message_id: status.message_id }).catch(() => {});
+    if (status) await tg('deleteMessage', { chat_id: chatIdOf(chatId), message_id: status.message_id }).catch(() => {});
     await send(chatId, footer).catch(() => {});
   }
 }
@@ -714,6 +790,90 @@ function modelKeyboard(b, current) {
   return kb(wide ? buttons.map((x) => [x]) : [buttons]);
 }
 
+// ------------------------------------------------------------ topic hub ---
+
+const TOPIC_ICON = { open: '🟢', closed: '🔒', gone: '🗑' };
+
+/** Move a conversation's whole state from one key to another (restore). */
+function moveConversation(fromKey, toKey) {
+  const from = state.chats[String(fromKey)];
+  if (!from) return false;
+  state.chats[String(toKey)] = from;
+  delete state.chats[String(fromKey)];
+  saveState();
+  return true;
+}
+
+/**
+ * Open a new topic and seed it from the hub's settings, so a fresh session
+ * starts in the same directory with the same agent unless told otherwise.
+ */
+async function openTopic(hubKey, name) {
+  const chatId = chatIdOf(hubKey);
+  const topic = await forum.create(chatId, name);
+  const key = keyOf(chatId, topic.message_thread_id);
+  const hub = chatState(hubKey);
+  const cs = chatState(key);
+  cs.cwd = hub.cwd;
+  cs.mode = hub.mode;
+  cs.stream = hub.stream;
+  cs.agent = hub.agent;
+  // Inherit the hub's model and effort per agent, but never its session: a new
+  // topic starts a NEW conversation with the same settings. Once you change
+  // something inside the topic it is on its own — nothing is copied back.
+  cs.per = {};
+  for (const [id, a] of Object.entries(hub.per || {})) {
+    cs.per[id] = { sessionId: null, model: a.model, effort: a.effort };
+  }
+  saveState();
+  const nb = backendOf(cs);
+  await send(key, S.topicWelcome(topic.name, cs.cwd, nb.name, modelLabel(agentState(cs).model)));
+  return { topic, key };
+}
+
+/** The hub listing: every topic this group has, with what to do about it. */
+async function sendTopicList(hubKey) {
+  const chatId = chatIdOf(hubKey);
+  const rows = forum.list(chatId);
+  if (!rows.length) { await send(hubKey, S.topicsNone); return; }
+
+  // Telegram caps a message at ~4096 characters and an inline keyboard at a
+  // hundred-odd buttons, so a long list has to be cut somewhere. Cut it here,
+  // deliberately, and say so — a silently truncated list reads as "that's all
+  // of them" when it is not.
+  const MAX_SHOWN = 20;
+  const shown = rows.slice(0, MAX_SHOWN);
+  const hidden = rows.length - shown.length;
+
+  const lines = [S.topicsHeader(rows.length)], buttons = [];
+  for (const t of shown) {
+    const cs = state.chats[keyOf(chatId, t.threadId)] || {};
+    const per = (cs.per && cs.per[cs.agent || DEFAULT_AGENT]) || {};
+    const b = backends.byId[cs.agent] || backends.byId[DEFAULT_AGENT];
+    lines.push(S.topicLine({
+      icon: TOPIC_ICON[t.status] || '•',
+      name: t.name,
+      agent: b ? b.name : cs.agent || '-',
+      session: per.sessionId ? b.sessionLabel(per.sessionId) : S.statusNewSession,
+      cwd: cs.cwd || '-',
+      when: ago(t.lastAt || t.createdAt || Date.now()),
+      live: running.has(keyOf(chatId, t.threadId)),
+    }));
+    const row = [];
+    if (t.status === 'open') row.push({ text: S.btnTopicClose(t.name), callback_data: `T:c:${t.threadId}` });
+    if (t.status === 'closed') row.push({ text: S.btnTopicReopen(t.name), callback_data: `T:o:${t.threadId}` });
+    if (t.status === 'gone') row.push({ text: S.btnTopicRestore(t.name), callback_data: `T:r:${t.threadId}` });
+    row.push({ text: S.btnTopicForget, callback_data: `T:x:${t.threadId}` });
+    buttons.push(row);
+  }
+  if (hidden > 0) lines.push('', S.topicsTruncated(hidden, MAX_SHOWN));
+  lines.push('', S.topicsHint);
+  await tg('sendMessage', {
+    ...route(hubKey), text: chunk(lines.join('\n'))[0],
+    disable_web_page_preview: true, ...kb(buttons),
+  });
+}
+
 async function sendSessionList(chatId) {
   const cs = chatState(chatId);
   const b = backendOf(cs);
@@ -736,7 +896,7 @@ async function sendSessionList(chatId) {
   });
   buttons.push([{ text: S.btnNewSession, callback_data: 'r:NEW' }]);
   await tg('sendMessage', {
-    chat_id: chatId, text: chunk(lines.join('\n'))[0],
+    ...route(chatId), text: chunk(lines.join('\n'))[0],
     disable_web_page_preview: true, ...kb(buttons),
   });
 }
@@ -764,15 +924,68 @@ async function handleCommand(chatId, text) {
       const lines = [S.agentCurrent(b.name), ''];
       for (const id of AGENT_IDS) lines.push(agentSummary(cs, id));
       lines.push('', S.agentHint);
-      await tg('sendMessage', { chat_id: chatId, text: lines.join('\n'), ...agentKeyboard(cs) });
+      await tg('sendMessage', { ...route(chatId), text: lines.join('\n'), ...agentKeyboard(cs) });
       return true;
     }
 
-    case '/new': case '/clear':
+    case '/new': case '/clear': {
+      // In a forum's General topic, "new session" means a new topic — that is
+      // the whole point of the hub. /clear always keeps the old meaning, so
+      // there is still a way to reset the hub's own session.
+      if (cmd === '/new' && !isTopic(chatId) && await forum.isForum(chatId)) {
+        try {
+          const { topic } = await openTopic(chatId, arg || S.topicDefaultName(new Date().toISOString().slice(5, 16).replace('T', ' ')));
+          await send(chatId, S.topicOpened(topic.name), { silent: true });
+        } catch (e) {
+          await send(chatId, S.topicFailed(e.message));
+        }
+        return true;
+      }
       clearGrants(chatId);
       as.sessionId = null; saveState();
       await send(chatId, S.newSession);
       return true;
+    }
+
+    case '/topics': {
+      if (!await forum.isForum(chatId)) { await send(chatId, S.topicsNotForum); return true; }
+      await sendTopicList(chatId);
+      return true;
+    }
+
+    case '/close': case '/drop': {
+      if (!isTopic(chatId)) { await send(chatId, S.topicOnlyInTopic); return true; }
+      const raw = chatIdOf(chatId), thread = threadOf(chatId);
+      // Whatever is running here dies with the topic — otherwise its output
+      // would be posted into a thread nobody can read any more.
+      const rt = running.get(chatId);
+      if (rt && rt.child) { rt.killedByUser = true; try { rt.child.kill('SIGTERM'); } catch (_) {} }
+      for (let i = queue.length - 1; i >= 0; i--) if (queue[i].chatId === chatId) queue.splice(i, 1);
+      const name = (forum.get(raw, thread) || {}).name || String(thread);
+      try {
+        if (cmd === '/drop') {
+          // The topic and its messages disappear, so the receipt goes to the hub.
+          await forum.drop(raw, thread);
+          await send(raw, S.topicDropped(name));
+        } else {
+          await send(chatId, S.topicClosing);
+          await forum.close(raw, thread);
+        }
+      } catch (e) {
+        await send(chatId, S.topicFailed(e.message));
+      }
+      return true;
+    }
+
+    case '/rename': {
+      if (!isTopic(chatId)) { await send(chatId, S.topicOnlyInTopic); return true; }
+      if (!arg) { await send(chatId, S.topicRenameUsage); return true; }
+      try {
+        await forum.rename(chatIdOf(chatId), threadOf(chatId), arg);
+        await send(chatId, S.topicRenamed(arg), { silent: true });
+      } catch (e) { await send(chatId, S.topicFailed(e.message)); }
+      return true;
+    }
 
     case '/sessions':
       await sendSessionList(chatId); return true;
@@ -815,7 +1028,7 @@ async function handleCommand(chatId, text) {
         return true;
       }
       await tg('sendMessage', {
-        chat_id: chatId,
+        ...route(chatId),
         text: S.modelCurrent(as.model || S.agentDefault, b.name) + (b.models.length && !b.modelsOpen ? '' : `\n${S.modelFreeText}`),
         ...modelKeyboard(b, as.model),
       });
@@ -831,7 +1044,7 @@ async function handleCommand(chatId, text) {
         return true;
       }
       await tg('sendMessage', {
-        chat_id: chatId,
+        ...route(chatId),
         text: S.effortCurrent(as.effort),
         ...kb([b.efforts.map((e) => ({ text: e === as.effort ? `● ${e}` : e, callback_data: `e:${e}` }))]),
       });
@@ -839,7 +1052,7 @@ async function handleCommand(chatId, text) {
 
     case '/mode':
       await tg('sendMessage', {
-        chat_id: chatId,
+        ...route(chatId),
         text: (!b.guard ? S.agentNoGuard(b.name) : GUARD_MODE === 'none' ? S.unleashedNotice : '') +
               S.modeCurrent(cs.mode, AUTO_ALLOW),
         ...kb([MODES.map((m) => ({
@@ -850,7 +1063,7 @@ async function handleCommand(chatId, text) {
 
     case '/stream':
       await tg('sendMessage', {
-        chat_id: chatId,
+        ...route(chatId),
         text: S.streamCurrent(cs.stream),
         ...kb([STREAMS.map((s) => ({
           text: s === cs.stream ? `● ${s}` : s, callback_data: `t:${s}`,
@@ -862,7 +1075,7 @@ async function handleCommand(chatId, text) {
       const g = [...grantsFor(chatId)];
       if (!g.length) { await send(chatId, S.grantsNone); return true; }
       await tg('sendMessage', {
-        chat_id: chatId,
+        ...route(chatId),
         text: S.grantsList(g.map((x) => S.reason(x))),
         ...kb([[{ text: S.btnRevokeAll, callback_data: 'g:clear' }]]),
       });
@@ -878,16 +1091,17 @@ async function handleCommand(chatId, text) {
         model: as.model || S.agentDefault, effort: as.effort || '-',
         guard: guardFor(cs) === 'none' ? 'none' : GUARD_MODE, mode: cs.mode, stream: cs.stream,
         grants: grantsFor(chatId).size, turns: cs.turns, cost: cs.costUsd.toFixed(3),
-        active, queued: q,
+        active: running.size, queued: q,
       }));
       return true;
     }
 
-    case '/stop':
-      if (running && running.chatId === chatId) {
-        running.killedByUser = true;
-        try { running.child.kill('SIGTERM'); } catch (_) {}
-        setTimeout(() => { try { running && running.child.kill('SIGKILL'); } catch (_) {} }, 5000);
+    case '/stop': {
+      const rt = running.get(chatId);
+      if (rt && rt.child) {
+        rt.killedByUser = true;
+        try { rt.child.kill('SIGTERM'); } catch (_) {}
+        setTimeout(() => { try { rt.child.kill('SIGKILL'); } catch (_) {} }, 5000);
         await send(chatId, S.stopping);
       } else {
         const before = queue.length;
@@ -895,6 +1109,7 @@ async function handleCommand(chatId, text) {
         await send(chatId, before > queue.length ? S.queueCleared : S.nothingRunning);
       }
       return true;
+    }
 
     default:
       return false;
@@ -904,14 +1119,16 @@ async function handleCommand(chatId, text) {
 // --------------------------------------------------------- callback query ---
 
 async function handleCallback(q) {
-  const chatId = String(q.message.chat.id);
+  // Buttons act on the conversation they were posted in, so a keyboard in one
+  // topic can never change another topic's model or session.
+  const chatId = keyOf(q.message.chat.id, q.message.message_thread_id);
   const data = String(q.data || '');
   const cs = chatState(chatId);
   const b = backendOf(cs);
   const as = agentState(cs);
   const ack = (text) => tg('answerCallbackQuery', { callback_query_id: q.id, text }).catch(() => {});
   const edit = (text, extra = {}) => tg('editMessageText', {
-    chat_id: chatId, message_id: q.message.message_id, text, ...extra,
+    chat_id: chatIdOf(chatId), message_id: q.message.message_id, text, ...extra,
   }).catch(() => {});
 
   // Approval decision
@@ -999,6 +1216,50 @@ async function handleCallback(q) {
     return;
   }
 
+  // Topic hub: close / reopen / restore / forget
+  if (data.startsWith('T:')) {
+    const [, kind, threadRaw] = data.split(':');
+    const thread = Number(threadRaw);
+    const raw = chatIdOf(chatId);
+    const rec = forum.get(raw, thread);
+    if (!rec) { await ack(S.ackTopicGone); return; }
+    const key = keyOf(raw, thread);
+    try {
+      if (kind === 'c') {
+        const rt = running.get(key);
+        if (rt && rt.child) { rt.killedByUser = true; try { rt.child.kill('SIGTERM'); } catch (_) {} }
+        await forum.close(raw, thread);
+        await ack(S.ackTopicClosed);
+      } else if (kind === 'o') {
+        await forum.reopen(raw, thread);
+        await ack(S.ackTopicReopened);
+      } else if (kind === 'r') {
+        // A deleted thread id is gone for good, so restoring means a NEW topic
+        // wearing the old one's state — including its session id, which is what
+        // makes the agent pick the conversation back up.
+        const moved = await forum.restore(raw, thread);
+        if (!moved) { await ack(S.ackTopicGone); return; }
+        moveConversation(moved.fromKey, moved.toKey);
+        const cs = chatState(moved.toKey);
+        const nb = backendOf(cs);
+        const sid = agentState(cs).sessionId;
+        await send(moved.toKey, S.topicRestored(moved.topic.name, cs.cwd, nb.name,
+          sid ? nb.sessionLabel(sid) : S.statusNewSession));
+        await ack(S.ackTopicRestored);
+      } else if (kind === 'x') {
+        forum.forget(raw, thread);
+        delete state.chats[key];
+        saveState();
+        await ack(S.ackTopicForgotten);
+      }
+    } catch (e) {
+      await ack(e.message.slice(0, 190));
+      return;
+    }
+    await sendTopicList(chatId);
+    return;
+  }
+
   if (data === 'g:clear') {
     clearGrants(chatId);
     await ack(S.ackRevoked);
@@ -1039,8 +1300,11 @@ async function poll() {
         if (u.callback_query) {
           const from = String(u.callback_query.from && u.callback_query.from.id);
           const chat = String(u.callback_query.message && u.callback_query.message.chat.id);
-          if (!ALLOWED.has(from) || !ALLOWED.has(chat)) {
-            log('warn', `Blocked callback from ${from}`);
+          // Two gates: the chat must be allowed, and — if TGA_ALLOWED_USER_IDS
+          // is set — the person tapping must be too. In a private chat these
+          // are the same check, since there chat.id === from.id.
+          if (!ALLOWED.has(chat) || !userAllowed(u.callback_query)) {
+            log('warn', `Blocked callback from ${from} in ${chat}`);
             await tg('answerCallbackQuery', { callback_query_id: u.callback_query.id, text: S.ackNotAllowed }).catch(() => {});
             continue;
           }
@@ -1049,18 +1313,62 @@ async function poll() {
         }
 
         const msg = u.message;
-        if (!msg || !msg.text) continue;
-        const chatId = String(msg.chat.id);
-        if (!ALLOWED.has(chatId)) {
-          log('warn', `Blocked unknown chat ${chatId}: ${msg.text.slice(0, 80)}`);
+        if (!msg) continue;
+        const rawChat = String(msg.chat.id);
+        if (!ALLOWED.has(rawChat)) {
+          log('warn', `Blocked unknown chat ${rawChat}: ${String(msg.text || '').slice(0, 80)}`);
           continue;
         }
+        // Dropped in silence, before anything else looks at the message: a
+        // stranger must not be able to register a topic or nudge its timestamp,
+        // let alone run a prompt. No reply either — nothing to probe.
+        if (!userAllowed(msg)) {
+          log('warn', `Blocked user ${senderId(msg) || '(not a user)'} in ${rawChat}: ${String(msg.text || '').slice(0, 80)}`);
+          continue;
+        }
+        // A topic created by hand in the group is registered the moment
+        // Telegram announces it, so /topics lists it with its real name.
+        if (msg.forum_topic_created && msg.message_thread_id) {
+          forum.register(rawChat, msg.message_thread_id, msg.forum_topic_created.name);
+        }
+        if (msg.forum_topic_closed && msg.message_thread_id) {
+          const rec = forum.get(rawChat, msg.message_thread_id);
+          if (rec) { rec.status = 'closed'; saveState(); }
+        }
+        if (msg.forum_topic_reopened && msg.message_thread_id) {
+          const rec = forum.get(rawChat, msg.message_thread_id);
+          if (rec) { rec.status = 'open'; saveState(); }
+        }
+        if (!msg.text) continue;
+
+        // The conversation key: the topic if there is one, otherwise the chat
+        // (a private chat, or the General topic of a forum).
+        const chatId = keyOf(rawChat, msg.message_thread_id);
+        if (isTopic(chatId) && !forum.get(rawChat, threadOf(chatId))) {
+          // First message in a topic the bot never saw created — adopt it.
+          forum.register(rawChat, threadOf(chatId), msg.reply_to_message
+            && msg.reply_to_message.forum_topic_created
+            && msg.reply_to_message.forum_topic_created.name);
+        }
+        // Telegram lets an admin keep posting in a closed topic, so a closed
+        // one can quietly come back to life. Follow that instead of leaving a
+        // 🔒 next to a topic that is plainly in use.
+        const rec = isTopic(chatId) ? forum.get(rawChat, threadOf(chatId)) : null;
+        if (rec && rec.status === 'closed') {
+          rec.status = 'open';
+          forum.reopen(rawChat, threadOf(chatId)).catch(() => {});
+        }
+        forum.touch(rawChat, threadOf(chatId));
+
         const text = msg.text.trim();
         if (text.startsWith('/') && await handleCommand(chatId, text)) continue;
 
-        const wasBusy = busy();
+        const wasBusy = busy(chatId);
         enqueue({ chatId, prompt: text, agent: chatState(chatId).agent });
-        if (wasBusy) await send(chatId, S.queued(queue.length), { silent: true });
+        if (wasBusy) {
+          const ahead = queue.filter((j) => j.chatId === chatId).length;
+          await send(chatId, S.queued(ahead), { silent: true });
+        }
       } catch (e) {
         log('error', `failed to handle update: ${e.stack || e.message}`);
       }
@@ -1085,13 +1393,16 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function log(level, msg) { console.log(`[${new Date().toISOString()}] ${level.toUpperCase()} ${msg}`); }
 function fatal(msg) { console.error(`FATAL ${msg}`); process.exit(1); }
 
-process.on('SIGTERM', () => { if (running) { try { running.child.kill('SIGTERM'); } catch (_) {} } process.exit(0); });
+process.on('SIGTERM', () => {
+  for (const rt of running.values()) { try { rt.child && rt.child.kill('SIGTERM'); } catch (_) {} }
+  process.exit(0);
+});
 process.on('unhandledRejection', (e) => log('error', `unhandledRejection: ${(e && e.stack) || e}`));
 
 writeClaudeSettings();
 startApprovalServer();
 saveState();
 const inventory = AGENT_IDS.map((id) => `${id}${backends.isInstalled(backends.byId[id]) ? '' : '(missing)'}`).join(', ');
-log('info', `Started. Chats: ${[...ALLOWED].join(', ')} · agents: ${inventory} · default: ${DEFAULT_AGENT} · cwd: ${DEFAULT_CWD} · mode: ${DEFAULT_MODE} · guard: ${GUARD_MODE} · stream: ${DEFAULT_STREAM} · lang: ${S.lang}`);
+log('info', `Started. Chats: ${[...ALLOWED].join(', ')} · users: ${ALLOWED_USERS.size ? [...ALLOWED_USERS].join(', ') : 'any in those chats'} · agents: ${inventory} · default: ${DEFAULT_AGENT} · cwd: ${DEFAULT_CWD} · mode: ${DEFAULT_MODE} · guard: ${GUARD_MODE} · stream: ${DEFAULT_STREAM} · lang: ${S.lang}`);
 registerCommands();
 poll();

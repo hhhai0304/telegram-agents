@@ -108,10 +108,71 @@ sang 18792 để hai bên chạy song song được trong lúc chuyển, nếu d
 | `/stream` | `batch` (gom 1 cục cuối lượt) hoặc `live` (gửi từng đoạn) |
 | `/cd <đường dẫn>` · `/pwd` | Đổi / xem thư mục làm việc (reset phiên của mọi agent) |
 | `/approvals` | Xem & thu hồi quyền "cả phiên" (Claude Code) |
+| `/topics` | Liệt kê topic của nhóm forum, kèm nút đóng / mở lại / khôi phục |
+| `/close` · `/drop` | Trong một topic: lưu trữ, hoặc xoá hẳn. Phiên vẫn được giữ ở cả hai |
+| `/rename <tên>` | Đổi tên topic hiện tại |
 | `/stop` | Dừng job đang chạy |
 
 Đổi agent khi job còn xếp hàng không đổi hướng job đó: tin nhắn chạy bằng agent đang chọn **lúc
 bạn gửi**.
+
+## Chạy nhiều việc cùng lúc
+
+Một chat = một cuộc trò chuyện, nên nhắn cái thứ hai thì phải chờ cái đầu xong. Muốn hai việc chạy
+song song thì dùng một **nhóm Telegram có bật Chủ đề (Topics)**. **Mỗi chủ đề là một phiên riêng** —
+thư mục riêng, agent riêng, trí nhớ riêng — và các chủ đề chạy cùng lúc.
+
+### Cài một lần
+
+1. **BotFather → `/setprivacy` → Disable.** Làm bước này trước, không thì bot không đọc được tin
+   nhắn của bạn trong nhóm.
+2. Tạo **nhóm mới**, thêm bot của bạn vào.
+3. Cài đặt nhóm → bật **Chủ đề (Topics)**.
+4. Cài đặt nhóm → **Quản trị viên** → thêm bot → tick **Quản lý chủ đề** và **Xoá tin nhắn**.
+5. Nhắn một câu bất kỳ trong nhóm, rồi xem log của bot, tìm dòng kiểu
+   `Blocked unknown chat -1001234567890`. Con số đó là id nhóm — bỏ vào `config.env`:
+
+   ```
+   TGA_ALLOWED_CHAT_IDS=<id chat riêng của bạn>,<id nhóm>
+   ```
+
+Khởi động lại bot. Xong.
+
+### Dùng
+
+**General** là phòng điều khiển. Còn lại mỗi chủ đề là một phiên.
+
+| Ở General | |
+|---|---|
+| `/new sửa đăng nhập` | mở chủ đề "sửa đăng nhập" và bắt đầu một phiên ở đó |
+| `/topics` | liệt kê mọi chủ đề, kèm nút bấm |
+
+| Trong một chủ đề | |
+|---|---|
+| *(gõ bình thường)* | nói chuyện với phiên đó |
+| `/close` | tạm xong — dừng việc đang chạy, giữ lại mọi thứ |
+| `/drop` | xoá chủ đề, **phiên vẫn được lưu** |
+| `/rename tên mới` | đổi tên |
+
+Lỡ xoá chủ đề và muốn lấy lại? Gõ `/topics` ở General → bấm **♻️ Khôi phục**. Một chủ đề mới mở ra
+và agent làm tiếp từ chỗ đang dở.
+
+Chủ đề mới chép lại thư mục, agent và model của General. Đổi gì bên trong chủ đề thì chỉ chủ đề đó
+đổi.
+
+### Giữ cho riêng mình
+
+Nhóm là một cái cửa: ai ở trong nhóm cũng ra lệnh được cho bot. Hai việc nên làm:
+
+- Đừng tạo link mời, và tắt **Thêm thành viên** trong phần quyền của nhóm.
+- Khai `TGA_ALLOWED_USER_IDS` bằng id của chính bạn. Khi đó dù có ai lọt vào, bot cũng bỏ qua họ
+  hoàn toàn.
+
+```
+TGA_ALLOWED_USER_IDS=<id của bạn>
+```
+
+Để trống thì ai trong nhóm cũng dùng được bot.
 
 ## Mô hình quyền
 
@@ -166,6 +227,8 @@ thích đầy đủ). Không muốn để token trong thư mục repo thì đặ
 |---|---|---|
 | `TG_BOT_TOKEN` | — | Token bot từ @BotFather |
 | `TGA_ALLOWED_CHAT_IDS` | — | Chat id được ra lệnh, cách nhau bằng dấu phẩy |
+| `TGA_ALLOWED_USER_IDS` | rỗng | Danh sách user id được phép; rỗng = ai trong các chat đó cũng được |
+| `TGA_MAX_CONCURRENT` | `2` | Số agent chạy cùng lúc; trong một chủ đề vẫn tuần tự |
 | `TGA_AGENTS` | tất cả | Agent nào hiện trong `/agent`: `claude,opencode,kilo,kiro` |
 | `TGA_AGENT` | `claude` | Agent mặc định cho chat mới |
 | `TGA_<AGENT>_BIN` | — | Đường dẫn file chạy, ví dụ `TGA_CLAUDE_BIN=/home/me/.local/bin/claude` |
