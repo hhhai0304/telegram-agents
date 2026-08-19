@@ -29,6 +29,8 @@ module.exports = {
   noteDenied: '❌ Denied',
 
   // --- turn lifecycle ------------------------------------------------------
+  costFree: '🆓 free',
+  costPaid: '💰 paid',
   tagResumed: (id) => `↩️ continuing ${id}`,
   tagNew: '🆕 new session',
   working: (tag) => `⏳ ${tag}`,

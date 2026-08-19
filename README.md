@@ -174,6 +174,7 @@ token out of the repo directory, `~/.config/telegram_secrets` is read as a secon
 | `TGA_AGENT` | `claude` | Agent a new chat starts with |
 | `TGA_<AGENT>_BIN` | — | Executable override, e.g. `TGA_CLAUDE_BIN=/home/me/.local/bin/claude` |
 | `TGA_<AGENT>_MODEL` | claude: `sonnet`, others: empty | Default model per agent; empty = CLI default |
+| `TGA_FREE_MODELS` | empty | Ids or prefixes to label 🆓 in the turn header; `:free` ids need no entry |
 | `TGA_CLAUDE_EFFORT` | `high` | Claude Code reasoning effort |
 | `TGA_KIRO_AGENT` | — | Kiro agent profile (`kiro-cli chat --agent`) |
 | `TGA_LANG` | `en` | UI language: `en` or `vi` |

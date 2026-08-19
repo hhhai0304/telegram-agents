@@ -24,6 +24,8 @@ module.exports = {
   noteAllowedSession: (sig) => `♾ Đã cho phép, và mọi "${sig}" phiên này sẽ không hỏi lại`,
   noteDenied: '❌ Đã từ chối',
 
+  costFree: '🆓 free',
+  costPaid: '💰 tính phí',
   tagResumed: (id) => `↩️ tiếp ${id}`,
   tagNew: '🆕 phiên mới',
   working: (tag) => `⏳ ${tag}`,

@@ -103,6 +103,8 @@ const AGENT_IDS = (env('AGENTS', '') || backends.ALL.map((b) => b.id).join(','))
   .split(',').map((s) => s.trim()).filter((id) => backends.byId[id]);
 if (!AGENT_IDS.length) fatal('TGA_AGENTS names no known agent. Known: ' + backends.ALL.map((b) => b.id).join(', '));
 const DEFAULT_AGENT = AGENT_IDS.includes(env('AGENT', 'claude')) ? env('AGENT', 'claude') : AGENT_IDS[0];
+// Models to label as free on top of the `:free` suffix: exact ids or prefixes.
+const FREE_MODELS = env('FREE_MODELS', '').split(',').map((s) => s.trim()).filter(Boolean);
 
 function agentDefaults(id) {
   const b = backends.byId[id];
@@ -444,6 +446,29 @@ function toolLabel(name, input) {
 }
 
 /** Effective guard for a chat: only Claude Code has a gate; the rest are unleashed. */
+/** Short label for a model id: the provider prefix is noise in a status line
+ *  (openrouter/openrouter/auto -> openrouter/auto). */
+function modelLabel(m) {
+  return m && m.includes('/') ? m.slice(m.indexOf('/') + 1) : (m || '');
+}
+
+/** Free or paid? `:free` is the CLIs' own marker; everything else depends on
+ *  the key behind it, not on the name, so TGA_FREE_MODELS declares the rest as
+ *  exact ids or prefixes (e.g. `google/` when that provider is a free tier).
+ *  An unset model means the CLI picks -- unknown, so it says neither. */
+function modelCost(model) {
+  if (!model) return '';
+  if (/:free$/.test(model) || FREE_MODELS.some((f) => model === f || model.startsWith(f))) return S.costFree;
+  return S.costPaid;
+}
+
+/** First line of every turn: which CLI, which model, and whether it bills.
+ *  With four agents and hundreds of models a turn is otherwise unattributable. */
+function turnHeader(b, as) {
+  const cost = modelCost(as.model);
+  return `${b.name} · ${as.model ? modelLabel(as.model) : S.agentDefault}${cost ? ` · ${cost}` : ''}`;
+}
+
 function guardFor(cs, b = backendOf(cs)) {
   if (!b.guard || GUARD_MODE === 'none') return 'none';
   return cs.mode === 'ask' ? 'all' : 'smart';
@@ -483,7 +508,7 @@ async function runJob(job) {
   // Tag showing whether this turn CONTINUES an old session or STARTS a new one.
   // Shown in the "working" message so nobody has to run /status to guess.
   const resumedFrom = as.sessionId;
-  const sessionTag = (resumedFrom ? S.tagResumed(b.sessionLabel(resumedFrom)) : S.tagNew) + ` · ${b.name}`;
+  const sessionTag = (resumedFrom ? S.tagResumed(b.sessionLabel(resumedFrom)) : S.tagNew) + ` · ${turnHeader(b, as)}`;
 
   log('info', `[${chatId}] agent=${b.id} cwd=${cs.cwd} mode=${cs.mode} guard=${guard} model=${as.model || '-'} effort=${as.effort || '-'} resume=${as.sessionId || '-'}`);
 

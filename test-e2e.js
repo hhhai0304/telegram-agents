@@ -23,6 +23,7 @@ const CHAT = '424242';
 const script = [
   { text: '/agent opencode' },
   { text: 'hello one' },
+  { text: '/model gemini-3.7-flash' },   // free by TGA_FREE_MODELS prefix, not by name
   { text: 'hello two' },
   { text: '/status' },
   { text: '/agent kiro' },
@@ -91,6 +92,11 @@ const api = http.createServer((req, res) => {
       // pin its binary to a path that cannot exist. Without this the assertion
       // depends on whether the host happens to have `kilo` on PATH.
       TGA_KILO_BIN: '/nonexistent/kilo',
+      // Between them these three exercise every branch of the price label:
+      // `:free` suffix, a prefix declared free, and a model that bills.
+      TGA_OPENCODE_MODEL: 'z-ai/glm-5.2:free',
+      TGA_KIRO_MODEL: 'anthropic/claude-sonnet-5',
+      TGA_FREE_MODELS: 'gemini-',
       CLAUDE_TG_ALLOWED_CHAT_IDS: '', CLAUDE_TG_GUARD_MODE: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -125,6 +131,14 @@ const api = http.createServer((req, res) => {
     assert.ok(edits.some((e) => /✅ \d+s · 1 tool · ↩️ session fake01|✅ \d+s · 1 tool · 🆕 session fake01/.test(e.text)), edits.map((e) => e.text).join('\n'));
   });
   test('opencode: audit lists the bash call', () => assert.ok(edits.some((e) => /Touched:\n• Bash: rm -rf \/tmp\/x/.test(e.text))));
+  test('every turn opens with the CLI, the model, and whether it bills', () => {
+    // `:free` marks itself; anything else bills unless TGA_FREE_MODELS says so.
+    assert.ok(texts.some((t) => /^⏳ .*· OpenCode · glm-5\.2:free · 🆓 free$/m.test(t)), texts.join('\n'));
+    assert.ok(texts.some((t) => /^⏳ .*· Kiro CLI · claude-sonnet-5 · 💰 paid$/m.test(t)), 'kiro header');
+  });
+  test('TGA_FREE_MODELS marks a model free by prefix', () => {
+    assert.ok(texts.some((t) => /^⏳ .*· OpenCode · gemini-3\.7-flash · 🆓 free$/m.test(t)), 'prefix-declared free');
+  });
   test('/status shows the agent and cost', () => {
     const t = texts.find((x) => /^🧠 OpenCode\n/.test(x));
     assert.ok(t, 'no status');
@@ -141,7 +155,7 @@ const api = http.createServer((req, res) => {
     const m = sent.find((x) => /Current agent: Kiro CLI/.test(x.text));
     assert.ok(m, 'no agent list');
     assert.ok(/• Kilo CLI ✗ not installed/.test(m.text), m.text);
-    assert.ok(/• OpenCode — model \(CLI default\) · session fake01/.test(m.text), m.text);
+    assert.ok(/• OpenCode — model gemini-3\.7-flash · session fake01/.test(m.text), m.text);
     const rows = m.reply_markup.inline_keyboard.map((r) => r[0].text);
     assert.deepStrictEqual(rows, ['Claude Code', 'OpenCode', 'Kilo CLI ✗', '● Kiro CLI']);
   });

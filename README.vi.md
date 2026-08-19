@@ -170,6 +170,7 @@ thích đầy đủ). Không muốn để token trong thư mục repo thì đặ
 | `TGA_AGENT` | `claude` | Agent mặc định cho chat mới |
 | `TGA_<AGENT>_BIN` | — | Đường dẫn file chạy, ví dụ `TGA_CLAUDE_BIN=/home/me/.local/bin/claude` |
 | `TGA_<AGENT>_MODEL` | claude: `sonnet`, còn lại: trống | Model mặc định từng agent; trống = để CLI tự chọn |
+| `TGA_FREE_MODELS` | trống | Id hoặc tiền tố được gắn 🆓 ở dòng đầu; id kết thúc `:free` khỏi cần khai |
 | `TGA_CLAUDE_EFFORT` | `high` | Effort của Claude Code |
 | `TGA_KIRO_AGENT` | — | Profile agent của Kiro (`kiro-cli chat --agent`) |
 | `TGA_LANG` | `en` | Ngôn ngữ giao diện: `en` hoặc `vi` |
