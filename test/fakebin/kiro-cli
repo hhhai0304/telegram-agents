@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+// Fake `kiro-cli chat --no-interactive --trust-all-tools -- <prompt>` for the e2e test.
+const args = process.argv.slice(2);
+const prompt = args[args.indexOf('--') + 1];
+process.stdout.write('\x1b[32m⠋ Thinking...\r');
+process.stdout.write('🛠️  Using tool: fs_read\n');
+process.stdout.write(`\x1b[1mfake-kiro says: ${prompt}\x1b[0m` + (args.includes('--resume') ? ' [resumed]' : ' [fresh]') + '\n');

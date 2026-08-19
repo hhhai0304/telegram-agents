@@ -1,0 +1,9 @@
+# Secrets and runtime state — never commit these
+config.env
+state.json
+claude-settings.json
+*.bak
+*.bak-*
+*.log
+node_modules/
+.DS_Store

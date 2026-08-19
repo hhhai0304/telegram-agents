@@ -1,0 +1,32 @@
+# Template. install.sh fills in the __XXX__ placeholders and installs it for you.
+# Doing it by hand: replace __USER__ / __DIR__ / __HOME__ / __NODE__ / __PATH__ /
+# __WANTEDBY__, and drop the User=/Group= lines for a user-scope install
+# (~/.config/systemd/user/).
+[Unit]
+Description=Telegram <-> coding-agent CLIs bridge (telegram-agents)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=__DIR__
+Environment=HOME=__HOME__
+Environment=PATH=__PATH__
+ExecStart=__NODE__ __DIR__/bot.js
+Restart=always
+RestartSec=10
+
+# Memory ceiling so a runaway job cannot eat the whole machine. Raise if you
+# have RAM to spare; these defaults suit a small single-board server.
+MemoryHigh=1500M
+MemoryMax=2500M
+TasksMax=256
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=telegram-agents
+
+[Install]
+WantedBy=__WANTEDBY__

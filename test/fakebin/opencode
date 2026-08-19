@@ -1,0 +1,10 @@
+#!/usr/bin/env node
+// Fake `opencode run --format json --auto -- <prompt>` for the e2e test.
+const args = process.argv.slice(2);
+const prompt = args[args.indexOf('--') + 1];
+const sess = args.includes('--session') ? args[args.indexOf('--session') + 1] : 'ses_fake01';
+const out = (o) => process.stdout.write(JSON.stringify({ sessionID: sess, ...o }) + '\n');
+out({ type: 'step_start', part: {} });
+out({ type: 'tool_use', part: { id: 't1', tool: 'bash', state: { status: 'completed', input: { command: 'rm -rf /tmp/x' } } } });
+out({ type: 'text', part: { text: `fake-opencode says: ${prompt} (args: ${args.join(' ')})` } });
+out({ type: 'step_finish', part: { cost: 0.001 } });
