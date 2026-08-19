@@ -26,7 +26,6 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const risk = require('./risk.js');
-const S = require('./strings');
 const backends = require('./backends');
 
 // ---------------------------------------------------------------- config ---
@@ -52,6 +51,9 @@ function loadEnvFile(file) {
 
 loadEnvFile(path.join(APP_DIR, 'config.env'));
 loadEnvFile(path.join(HOME, '.config', 'telegram_secrets'));
+
+// ./strings reads TGA_LANG at require time, so it must load after config.env.
+const S = require('./strings');
 
 /** TGA_<name>, falling back to the claude-telegram era CLAUDE_TG_<name>. */
 function env(name, def) {
@@ -675,7 +677,16 @@ function agentSummary(cs, id = cs.agent) {
 
 function modelKeyboard(b, current) {
   if (!b.models.length) return {};
-  return kb([b.models.map((m) => ({ text: m === current ? `● ${m}` : m, callback_data: `m:${m}` }))]);
+  // Short ids (Claude: sonnet, opus, ...) fit on one row; provider-qualified
+  // ones (openrouter/google/gemini-3.7-flash) need a row each to stay readable
+  // on a phone. The label drops the provider prefix, the callback keeps the id.
+  const label = (m) => (m.includes('/') ? m.slice(m.indexOf('/') + 1) : m);
+  const wide = b.models.some((m) => label(m).length > 12);
+  const buttons = b.models.map((m) => ({
+    text: (m === current ? '● ' : '') + label(m),
+    callback_data: `m:${m}`,
+  }));
+  return kb(wide ? buttons.map((x) => [x]) : [buttons]);
 }
 
 async function sendSessionList(chatId) {
@@ -773,14 +784,14 @@ async function handleCommand(chatId, text) {
 
     case '/model': {
       if (arg) {
-        if (b.models.length && !b.models.includes(arg)) { await send(chatId, S.ackUnknownModel + `: ${b.models.join(' / ')}`); return true; }
+        if (b.models.length && !b.modelsOpen && !b.models.includes(arg)) { await send(chatId, S.ackUnknownModel + `: ${b.models.join(' / ')}`); return true; }
         as.model = arg === '-' ? '' : arg; saveState();
         await send(chatId, `🤖 ${b.name} · model: ${as.model || S.agentDefault}`);
         return true;
       }
       await tg('sendMessage', {
         chat_id: chatId,
-        text: S.modelCurrent(as.model || S.agentDefault, b.name) + (b.models.length ? '' : `\n${S.modelFreeText}`),
+        text: S.modelCurrent(as.model || S.agentDefault, b.name) + (b.models.length && !b.modelsOpen ? '' : `\n${S.modelFreeText}`),
         ...modelKeyboard(b, as.model),
       });
       return true;
@@ -913,7 +924,7 @@ async function handleCallback(q) {
 
   if (data.startsWith('m:')) {
     const m = data.slice(2);
-    if (b.models.length && !b.models.includes(m)) { await ack(S.ackUnknownModel); return; }
+    if (b.models.length && !b.modelsOpen && !b.models.includes(m)) { await ack(S.ackUnknownModel); return; }
     as.model = m; saveState();
     await ack(`Model: ${m}`);
     await edit(`🤖 ${b.name} · model: ${m}`, modelKeyboard(b, m));
@@ -1032,6 +1043,17 @@ async function poll() {
   }
 }
 
+/** Publish the slash-command menu so Telegram's autocomplete matches this bot. */
+async function registerCommands() {
+  try {
+    await tg('setMyCommands', {
+      commands: S.menuCommands.map(([command, description]) => ({ command, description })),
+    });
+  } catch (e) {
+    log('warn', `setMyCommands failed: ${(e && e.message) || e}`);
+  }
+}
+
 // ----------------------------------------------------------------- utils ---
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -1046,4 +1068,5 @@ startApprovalServer();
 saveState();
 const inventory = AGENT_IDS.map((id) => `${id}${backends.isInstalled(backends.byId[id]) ? '' : '(missing)'}`).join(', ');
 log('info', `Started. Chats: ${[...ALLOWED].join(', ')} · agents: ${inventory} · default: ${DEFAULT_AGENT} · cwd: ${DEFAULT_CWD} · mode: ${DEFAULT_MODE} · guard: ${GUARD_MODE} · stream: ${DEFAULT_STREAM} · lang: ${S.lang}`);
+registerCommands();
 poll();

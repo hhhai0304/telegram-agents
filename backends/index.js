@@ -9,6 +9,7 @@
  *   name          human label
  *   bin           executable name; overridable with TGA_<ID>_BIN
  *   models        [] = free text via `/model <name>`; non-empty = buttons
+ *   modelsOpen    true  = the buttons are a shortlist, `/model <anything>` still works
  *   defaultModel  '' = don't pass a model flag, let the CLI decide
  *   efforts       null = the CLI has no effort knob
  *   guard         true  = the tool-approval gate (approve-hook.js) works here

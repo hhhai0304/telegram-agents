@@ -87,6 +87,10 @@ const api = http.createServer((req, res) => {
       TGA_DEFAULT_CWD: dataDir,
       TGA_LANG: 'en',
       TGA_AGENTS: '', TGA_AGENT: 'claude',
+      // Kilo has no fake CLI: the test asserts it shows up as NOT installed, so
+      // pin its binary to a path that cannot exist. Without this the assertion
+      // depends on whether the host happens to have `kilo` on PATH.
+      TGA_KILO_BIN: '/nonexistent/kilo',
       CLAUDE_TG_ALLOWED_CHAT_IDS: '', CLAUDE_TG_GUARD_MODE: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

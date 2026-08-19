@@ -145,6 +145,26 @@ module.exports = {
   statusNewSession: '(new)',
 
   // --- help ----------------------------------------------------------------
+  // Slash-command menu published to Telegram with setMyCommands on every boot.
+  // Keep it in sync with handleCommand(); a stale menu autocompletes commands
+  // this bot does not have, and unknown commands are sent to the agent as text.
+  menuCommands: [
+    ['agent', 'Switch coding agent'],
+    ['model', 'Show or set the model for this agent'],
+    ['effort', 'Reasoning effort: low to max (Claude Code)'],
+    ['mode', 'Approval mode: smart / ask / auto'],
+    ['stream', 'Replies: batch (one message) or live'],
+    ['sessions', 'Recent sessions, tap to resume'],
+    ['resume', 'Resume a session by id'],
+    ['new', 'Start a new session'],
+    ['status', 'Session, directory, model, effort, cost'],
+    ['pwd', 'Show the working directory'],
+    ['cd', 'Change the working directory'],
+    ['approvals', 'View and revoke session-wide grants'],
+    ['stop', 'Stop the running job'],
+    ['help', 'Show available commands'],
+  ],
+
   help: (unleashed, agents) => [
     'Coding agents over Telegram — just send a message and the current agent runs it.',
     '',

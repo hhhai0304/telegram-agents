@@ -4,6 +4,10 @@
  * No network, no CLIs needed. Run: node test-backends.js */
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
 const backends = require('./backends');
 const { normalizeTool } = require('./backends/opencode-family.js');
 
@@ -89,7 +93,9 @@ for (const id of ['opencode', 'kilo']) {
     const { args } = b.buildArgs({ prompt: 'fix the bug', model: '', sessionId: null });
     assert.deepStrictEqual(args, ['run', '--format', 'json', '--auto', '--', 'fix the bug']);
     assert.strictEqual(b.stdinPrompt, false);
-    assert.strictEqual(b.guard, false);
+    // guard is NOT asserted here: it depends on whether the approval-gate
+    // plugin is installed on this machine. Pinned down in its own test below.
+    assert.strictEqual(typeof b.guard, 'boolean');
   });
   test(`${id}: model + session flags`, () => {
     const { args } = b.buildArgs({ prompt: 'x', model: 'anthropic/claude-sonnet-4-5', sessionId: 'ses_1' });
@@ -160,6 +166,55 @@ test('kiro: text parsing strips ANSI, spinners, counts tools', () => {
 });
 test('kiro: no output still yields session + result', () => {
   assert.deepStrictEqual(types(collect(kiro, [])), ['session', 'result']);
+});
+
+// --------------------------------------------- opencode-family guard flag ---
+// `guard` must mirror reality: true only when the plugin that enforces it is
+// actually installed for that CLI. Run in a subprocess with a throwaway HOME so
+// the result does not depend on this machine.
+function guardWithHome(id, install) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tga-guard-'));
+  if (install) {
+    const dir = path.join(home, '.config', id, 'plugin');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'telegram-agents-guard.js'), '// stand-in\n');
+  }
+  const out = execFileSync(process.execPath,
+    ['-e', `console.log(require(${JSON.stringify(path.join(__dirname, 'backends', id + '.js'))}).guard)`],
+    { env: { ...process.env, HOME: home }, encoding: 'utf8' });
+  fs.rmSync(home, { recursive: true, force: true });
+  return out.trim();
+}
+test('kilo: guard is false without the approval-gate plugin', () => {
+  assert.strictEqual(guardWithHome('kilo', false), 'false');
+});
+test('kilo: guard turns true once the plugin is installed', () => {
+  assert.strictEqual(guardWithHome('kilo', true), 'true');
+});
+test('opencode: the same plugin lookup applies, per CLI config dir', () => {
+  assert.strictEqual(guardWithHome('opencode', true), 'true');
+  assert.strictEqual(guardWithHome('opencode', false), 'false');
+});
+
+// ------------------------------------------------------- kilo model shortlist ---
+test('kilo: /model offers a shortlist but stays open to any id', () => {
+  const kilo = backends.byId.kilo;
+  assert.strictEqual(kilo.defaultModel, 'openrouter/openrouter/auto');
+  assert.ok(kilo.models.includes('openrouter/anthropic/claude-opus-5'));
+  assert.ok(kilo.models.includes('google/gemini-3.7-flash'));
+  assert.ok(kilo.models.includes('openrouter/z-ai/glm-5.2:free'));
+  assert.strictEqual(kilo.modelsOpen, true, 'typing another id must still work');
+  // Telegram rejects callback_data over 64 bytes; `m:` + the id must fit.
+  for (const m of kilo.models) assert.ok(Buffer.byteLength(`m:${m}`) <= 64, m);
+});
+test('kilo: the default model reaches the CLI as --model', () => {
+  const kilo = backends.byId.kilo;
+  const { args } = kilo.buildArgs({ prompt: 'x', model: kilo.defaultModel, sessionId: null });
+  assert.strictEqual(args[args.indexOf('--model') + 1], 'openrouter/openrouter/auto');
+});
+test('opencode: unchanged, no shortlist of its own', () => {
+  assert.deepStrictEqual(backends.byId.opencode.models, []);
+  assert.strictEqual(backends.byId.opencode.defaultModel, '');
 });
 
 console.log(`1..${n}`);

@@ -41,13 +41,19 @@ bạn (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ clau
 | Agent | id `/agent` | Lệnh chạy bên dưới | Phiên | Nút duyệt | Model / effort |
 |---|---|---|---|---|---|
 | Claude Code | `claude` | `claude -p --output-format stream-json` | liệt kê + resume theo id | ✅ smart / ask / auto | nút bấm · low→max |
-| OpenCode | `opencode` | `opencode run --format json --auto` | liệt kê + resume theo id (quét best-effort `~/.local/share/opencode`) | ✗ luôn `--auto` | `/model provider/model` |
-| Kilo CLI | `kilo` | `kilo run --format json --auto` | như OpenCode | ✗ luôn `--auto` | `/model provider/model` |
+| OpenCode | `opencode` | `opencode run --format json --auto` | liệt kê + resume theo id | ✅ nếu cài plugin cổng duyệt | `/model provider/model` |
+| Kilo CLI | `kilo` | `kilo run --format json --auto` | như OpenCode | ✅ nếu cài plugin cổng duyệt | nút chọn sẵn vài model, `/model <id bất kỳ>` cho phần còn lại |
 | Kiro CLI | `kiro` | `kiro-cli chat --no-interactive --trust-all-tools` | mỗi thư mục một cuộc, `--resume` | ✗ luôn trust hết tool | `/model <tên>` |
 
-Chỉ Claude Code có hook để bot gắn cổng duyệt. OpenCode, Kilo, Kiro ở chế độ không tương tác sẽ từ
-chối mọi câu hỏi quyền nếu không bật tự duyệt, nên chúng chạy kiểu đó — coi như *thả xích* theo
-thiết kế. `/mode`, `/approvals`, `/effort` chỉ áp dụng cho Claude Code và bot sẽ nói rõ.
+Claude Code được xích bằng hook `PreToolUse`. Họ OpenCode không có hook đó, nhưng có plugin, và
+`tool.execute.before` của plugin có quyền chặn một tool call — đó là việc của
+`plugin/telegram-agents-guard.mjs`, dùng lại đúng `risk.js` và đúng mấy cái nút Telegram. Phải tự
+bật: cài plugin cho từng CLI (xem [Mô hình quyền](#mô-hình-quyền)) thì agent chuyển từ *thả xích*
+sang có xích; không cài thì chúng chạy `--auto` và danh sách `/agent` ghi rõ. Kiro không có cả hook
+lẫn plugin nên luôn thả xích. `/effort` chỉ Claude Code mới có.
+
+Danh sách phiên lấy theo kho của từng CLI: OpenCode ghi ra file JSON, còn Kilo 7.x cất phiên trong
+SQLite và chỉ lộ ra qua `kilo session list --format json`; adapter thử file trước, hụt thì gọi CLI.
 
 Kiro in chữ thường chứ không có event; bot lột màu và spinner, gửi câu trả lời khi lượt kết thúc,
 đếm dòng `Using tool:` để dòng tiến độ vẫn nhúc nhích.
@@ -107,7 +113,7 @@ sang 18792 để hai bên chạy song song được trong lúc chuyển, nếu d
 Đổi agent khi job còn xếp hàng không đổi hướng job đó: tin nhắn chạy bằng agent đang chọn **lúc
 bạn gửi**.
 
-## Mô hình quyền (Claude Code)
+## Mô hình quyền
 
 Phần này nên đọc trước khi chĩa bot vào một cái máy bạn còn quý.
 
@@ -121,6 +127,27 @@ quyết định: chạy thẳng, hay hỏi bạn. `TGA_MODE` chọn chính sách
 
 `risk.js` còn **đọc nội dung script** trước khi cho chạy, nên `node deploy.mjs` bị xét theo những gì
 nằm trong `deploy.mjs`, không phải theo chữ "node".
+
+### Gắn xích cho OpenCode và Kilo
+
+Plugin không tự cài — symlink nó vào thư mục config của chính CLI đó rồi restart bot:
+
+```bash
+mkdir -p ~/.config/kilo/plugin
+ln -s ~/telegram-agents/plugin/telegram-agents-guard.mjs \
+      ~/.config/kilo/plugin/telegram-agents-guard.js     # OpenCode thì ~/.config/opencode/plugin/
+sudo systemctl restart telegram-agents
+```
+
+Backend kiểm tra file đó lúc khởi động rồi mới báo `guard`, nên cái `/agent` hiện ra đúng bằng cái
+đang chạy — không có chuyện khoe "có xích" mà chẳng ai giữ. Plugin đọc đúng bộ biến `TGA_*` như hook
+của Claude và cũng **fail closed** y hệt: đã bật xích thì thiếu URL duyệt, bot chết, hay hết giờ chờ
+đều thành huỷ tool call. Với `TGA_GUARD=none` nó không gắn hook nào cả, nên bạn tự gõ `kilo` ở
+terminal vẫn như thường.
+
+CLI vẫn chạy kèm `--auto`, cố ý: cái đó trả lời **câu hỏi quyền của chính nó**, không có thì ở chế độ
+không tương tác nó từ chối sạch. Cổng duyệt là plugin, không phải CLI. Nhớ giới hạn: chỉ tool call
+được canh, còn CLI làm gì ngoài tool call thì không.
 
 ### Thả xích
 

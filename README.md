@@ -41,14 +41,20 @@ you (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude
 | Agent | `/agent` id | Command it runs | Sessions | Approval buttons | Model / effort |
 |---|---|---|---|---|---|
 | Claude Code | `claude` | `claude -p --output-format stream-json` | list + resume by id | ✅ smart / ask / auto | buttons · low→max |
-| OpenCode | `opencode` | `opencode run --format json --auto` | list + resume by id (best-effort scan of `~/.local/share/opencode`) | ✗ always `--auto` | `/model provider/model` |
-| Kilo CLI | `kilo` | `kilo run --format json --auto` | same as OpenCode | ✗ always `--auto` | `/model provider/model` |
+| OpenCode | `opencode` | `opencode run --format json --auto` | list + resume by id | ✅ with the guard plugin | `/model provider/model` |
+| Kilo CLI | `kilo` | `kilo run --format json --auto` | same as OpenCode | ✅ with the guard plugin | buttons for a shortlist, `/model <any id>` for the rest |
 | Kiro CLI | `kiro` | `kiro-cli chat --no-interactive --trust-all-tools` | one per directory, `--resume` | ✗ always trusts all tools | `/model <name>` |
 
-Only Claude Code exposes a hook the bot can put a gate on. OpenCode, Kilo and Kiro reject every
-permission prompt in non-interactive mode unless told to auto-approve, so that is how they run —
-treat them as *off the leash* by design. `/mode`, `/approvals` and `/effort` only apply to Claude
-Code and say so.
+Claude Code is gated through its `PreToolUse` hook. The OpenCode family has no such hook, but it
+does have plugins, and a plugin's `tool.execute.before` can refuse a tool call — that is what
+`plugin/telegram-agents-guard.mjs` does, reusing the same `risk.js` and the same Telegram buttons.
+It is opt-in: install it per CLI (see [The permission model](#the-permission-model)) and the agent
+switches from *off the leash* to guarded; without it these agents run `--auto` and the `/agent`
+list says so. Kiro has neither hook nor plugin and is always unleashed. `/effort` is Claude-only.
+
+Session lists come from whatever store the CLI uses: OpenCode writes JSON files, Kilo 7.x keeps
+sessions in SQLite and only exposes them through `kilo session list --format json`; the adapter
+tries the files first and falls back to the CLI.
 
 Kiro prints plain text rather than events; the bot strips the colours and spinners and delivers
 the answer when the turn ends, counting `Using tool:` lines for the progress ticker.
@@ -108,7 +114,7 @@ moved to 18792 so the two can coexist during the switch if you use different bot
 Switching agents while a job is queued does not reroute it: a message runs under the agent that
 was selected when you sent it.
 
-## The permission model (Claude Code)
+## The permission model
 
 This is the part worth reading before you point it at a machine you care about.
 
@@ -123,6 +129,28 @@ Claude Code runs under a `PreToolUse` hook (`approve-hook.js`). Every tool call 
 
 `risk.js` also reads the *contents* of scripts before letting the agent execute them, so
 `node deploy.mjs` is judged by what's inside `deploy.mjs`, not by the fact that it says "node".
+
+### Gating OpenCode and Kilo
+
+The plugin is not installed automatically — symlink it into the CLI's own config directory and
+restart the bot:
+
+```bash
+mkdir -p ~/.config/kilo/plugin
+ln -s ~/telegram-agents/plugin/telegram-agents-guard.mjs \
+      ~/.config/kilo/plugin/telegram-agents-guard.js     # ~/.config/opencode/plugin/ for OpenCode
+sudo systemctl restart telegram-agents
+```
+
+The backend looks for that file at startup and reports `guard` accordingly, so what `/agent` shows
+is what actually runs — a backend never claims to be guarded with nothing enforcing it. The plugin
+reads the same `TGA_*` variables as the Claude hook and fails closed the same way: once the guard
+is on, a missing approval URL, an unreachable bot or a timeout all abort the tool call. With
+`TGA_GUARD=none` it installs no hook at all, so running `kilo` yourself is unaffected.
+
+The CLI still runs with `--auto`, on purpose: that answers *its own* permission prompts, which it
+would otherwise reject outright in non-interactive mode. The gate is the plugin, not the CLI. Note
+the scope — tool calls are covered, anything the CLI does outside a tool call is not.
 
 ### Off the leash
 

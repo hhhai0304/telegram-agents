@@ -132,6 +132,23 @@ module.exports = {
   ].join('\n'),
   statusNewSession: '(mới)',
 
+  menuCommands: [
+    ['agent', 'Chuyển agent'],
+    ['model', 'Xem hoặc đặt model cho agent hiện tại'],
+    ['effort', 'Mức suy nghĩ: low → max (Claude Code)'],
+    ['mode', 'Chế độ duyệt: smart / ask / auto'],
+    ['stream', 'Trả lời: batch (gom 1 cục) hoặc live'],
+    ['sessions', 'Phiên gần đây, bấm để resume'],
+    ['resume', 'Resume phiên theo id'],
+    ['new', 'Bắt đầu phiên mới'],
+    ['status', 'Phiên, thư mục, model, effort, chi phí'],
+    ['pwd', 'Xem thư mục đang làm việc'],
+    ['cd', 'Đổi thư mục làm việc'],
+    ['approvals', 'Xem & thu hồi quyền "cả phiên"'],
+    ['stop', 'Dừng job đang chạy'],
+    ['help', 'Xem các lệnh có sẵn'],
+  ],
+
   help: (unleashed, agents) => [
     'Coding agent qua Telegram — nhắn thẳng là agent hiện tại chạy.',
     '',
