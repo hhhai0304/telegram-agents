@@ -134,6 +134,13 @@ module.exports = {
   ].join('\n'),
   statusNewSession: '(mới)',
 
+  // --- tệp đính kèm --------------------------------------------------------
+  mediaLine: (kind, name, p) => `[${kind}: ${name}]\n${p}`,
+  mediaNoCaption: (n) => n === 1
+    ? 'Xem giúp mình tệp đính kèm.'
+    : `Xem giúp mình ${n} tệp đính kèm.`,
+  mediaSaved: (n) => n === 1 ? '📎 Đã lưu 1 tệp đính kèm.' : `📎 Đã lưu ${n} tệp đính kèm.`,
+  mediaFailed: (kind, why) => `⚠️ Không tải được ${kind}: ${why}`,
   // --- topic trong forum ---------------------------------------------------
   topicWelcome: (name, cwd, agent, model) =>
     `🧵 ${name}\n📁 ${cwd}\n🧠 ${agent}${model ? ` · ${model}` : ''}\n\nThiết lập lấy từ General; đổi ở đây thì topic này đi đường riêng.\nNhắn gì đó để bắt đầu. /close để lưu trữ topic, /drop để xoá hẳn.`,

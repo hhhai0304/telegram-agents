@@ -146,6 +146,15 @@ module.exports = {
   ].join('\n'),
   statusNewSession: '(new)',
 
+  // --- attachments ---------------------------------------------------------
+  // Files are fetched to disk and named in the prompt, because the agents read
+  // paths, not Telegram updates.
+  mediaLine: (kind, name, p) => `[${kind}: ${name}]\n${p}`,
+  mediaNoCaption: (n) => n === 1
+    ? 'Have a look at the attached file.'
+    : `Have a look at the ${n} attached files.`,
+  mediaSaved: (n) => n === 1 ? '📎 Saved 1 attachment.' : `📎 Saved ${n} attachments.`,
+  mediaFailed: (kind, why) => `⚠️ Could not fetch the ${kind}: ${why}`,
   // --- forum topics --------------------------------------------------------
   // A supergroup with Topics turns each thread into its own session; the
   // General topic is the hub that opens, lists and restores them.

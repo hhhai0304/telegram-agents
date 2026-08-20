@@ -151,6 +151,7 @@ Restart the bot. Done.
 | In a topic | |
 |---|---|
 | *(just type)* | talks to that session |
+| *(a photo or file)* | fetched to disk and handed to the agent; the caption is your question |
 | `/close` | done for now — stops what is running, keeps everything |
 | `/drop` | delete the topic, **the session is still saved** |
 | `/rename new name` | rename it |
@@ -174,6 +175,19 @@ TGA_ALLOWED_USER_IDS=<your id>
 ```
 
 Leave it empty and anyone in the group can use the bot.
+
+## Sending files
+
+Send a photo, a screenshot or a document and the bot fetches it to a temp file,
+then hands the agent the path. The caption is your question; with no caption it
+simply asks the agent to take a look. Send several photos at once and they
+arrive as **one** message, not one turn per photo.
+
+Editing a message you already sent counts as asking again.
+
+Files land in `/tmp/telegram-agents-media` and are swept after a day. Telegram
+caps a bot download at 20 MB — anything larger is refused with a message rather
+than ignored.
 
 ## The permission model
 

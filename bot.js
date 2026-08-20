@@ -28,6 +28,7 @@ const { spawn } = require('child_process');
 const risk = require('./risk.js');
 const backends = require('./backends');
 const makeForum = require('./forum.js');
+const makeMedia = require('./media.js');
 const { keyOf, route, chatIdOf, threadOf, isTopic } = makeForum;
 
 // ---------------------------------------------------------------- config ---
@@ -230,6 +231,15 @@ const backendOf = (cs) => backends.byId[cs.agent];
 // ------------------------------------------------------------------ forum ---
 
 const forum = makeForum({ tg: (...a) => tg(...a), state, saveState, log });
+
+// -------------------------------------------------------------- attachments ---
+
+const media = makeMedia({
+  tg: (...a) => tg(...a),
+  apiBase: env('TELEGRAM_API', 'https://api.telegram.org'),
+  token: TOKEN,
+  log,
+});
 
 /** "Allow for this session" grants: Map(sessionKey -> Set(signature)). In memory only. */
 const sessionGrants = new Map();
@@ -1279,7 +1289,10 @@ async function poll() {
     try {
       updates = await tg('getUpdates', {
         offset: state.offset, timeout: 50,
-        allowed_updates: ['message', 'callback_query'],
+        // edited_message matters: fixing a typo in a question you already sent
+        // is the most natural thing in the world, and dropping it looks like the
+        // bot ignoring you.
+        allowed_updates: ['message', 'edited_message', 'callback_query'],
       }, { retries: 0 });
       conflicts = 0;
     } catch (e) {
@@ -1312,7 +1325,10 @@ async function poll() {
           continue;
         }
 
-        const msg = u.message;
+        // An edit is just the message again, with better wording. Treat it as
+        // a fresh turn rather than dropping it — silence after someone fixes a
+        // typo reads as the bot ignoring them.
+        const msg = u.message || u.edited_message;
         if (!msg) continue;
         const rawChat = String(msg.chat.id);
         if (!ALLOWED.has(rawChat)) {
@@ -1339,40 +1355,92 @@ async function poll() {
           const rec = forum.get(rawChat, msg.message_thread_id);
           if (rec) { rec.status = 'open'; saveState(); }
         }
-        if (!msg.text) continue;
+        // Text, a caption, or nothing but attachments — all three are real
+        // messages. Only a message with neither text nor anything to fetch is
+        // noise (a service message, a poll, a location).
+        const caption = (msg.text || msg.caption || '').trim();
+        if (!caption && !media.hasMedia(msg)) continue;
 
-        // The conversation key: the topic if there is one, otherwise the chat
-        // (a private chat, or the General topic of a forum).
-        const chatId = keyOf(rawChat, msg.message_thread_id);
-        if (isTopic(chatId) && !forum.get(rawChat, threadOf(chatId))) {
-          // First message in a topic the bot never saw created — adopt it.
-          forum.register(rawChat, threadOf(chatId), msg.reply_to_message
-            && msg.reply_to_message.forum_topic_created
-            && msg.reply_to_message.forum_topic_created.name);
+        // An album arrives as several updates sharing a media_group_id. Hold
+        // them briefly and deliver one prompt, or every photo starts its own
+        // turn.
+        if (msg.media_group_id) {
+          media.collect(msg, (msgs) => {
+            handleMessage(rawChat, msgs).catch((e) =>
+              log('error', `album failed: ${e.stack || e.message}`));
+          });
+          continue;
         }
-        // Telegram lets an admin keep posting in a closed topic, so a closed
-        // one can quietly come back to life. Follow that instead of leaving a
-        // 🔒 next to a topic that is plainly in use.
-        const rec = isTopic(chatId) ? forum.get(rawChat, threadOf(chatId)) : null;
-        if (rec && rec.status === 'closed') {
-          rec.status = 'open';
-          forum.reopen(rawChat, threadOf(chatId)).catch(() => {});
-        }
-        forum.touch(rawChat, threadOf(chatId));
-
-        const text = msg.text.trim();
-        if (text.startsWith('/') && await handleCommand(chatId, text)) continue;
-
-        const wasBusy = busy(chatId);
-        enqueue({ chatId, prompt: text, agent: chatState(chatId).agent });
-        if (wasBusy) {
-          const ahead = queue.filter((j) => j.chatId === chatId).length;
-          await send(chatId, S.queued(ahead), { silent: true });
-        }
+        await handleMessage(rawChat, [msg]);
       } catch (e) {
         log('error', `failed to handle update: ${e.stack || e.message}`);
       }
     }
+  }
+}
+
+/**
+ * One incoming message, or one album delivered together.
+ *
+ * Attachments are fetched before the prompt is built, so the agent is handed
+ * real paths on disk rather than Telegram file ids it cannot do anything with.
+ */
+async function handleMessage(rawChat, msgs) {
+  const msg = msgs[0];
+  const chatId = keyOf(rawChat, msg.message_thread_id);
+  if (isTopic(chatId) && !forum.get(rawChat, threadOf(chatId))) {
+    // First message in a topic the bot never saw created — adopt it.
+    forum.register(rawChat, threadOf(chatId), msg.reply_to_message
+      && msg.reply_to_message.forum_topic_created
+      && msg.reply_to_message.forum_topic_created.name);
+  }
+  // Telegram lets an admin keep posting in a closed topic, so a closed
+  // one can quietly come back to life. Follow that instead of leaving a
+  // 🔒 next to a topic that is plainly in use.
+  const rec = isTopic(chatId) ? forum.get(rawChat, threadOf(chatId)) : null;
+  if (rec && rec.status === 'closed') {
+    rec.status = 'open';
+    forum.reopen(rawChat, threadOf(chatId)).catch(() => {});
+  }
+  forum.touch(rawChat, threadOf(chatId));
+
+  // Telegram puts an album's caption on exactly one of its messages.
+  const said = msgs.map((m) => (m.text || m.caption || '').trim()).filter(Boolean).join('\n').trim();
+
+  if (said.startsWith('/') && await handleCommand(chatId, said)) return;
+
+  // Fetch every attachment before running anything: a half-downloaded
+  // album would send the agent looking at files that are not there yet.
+  const files = [];
+  let attempted = 0;
+  for (const m of msgs) {
+    if (!media.hasMedia(m)) continue;
+    attempted++;
+    try {
+      const f = await media.fetchOne(m);
+      if (f) files.push(f);
+    } catch (e) {
+      await send(chatId, S.mediaFailed(media.describe(m).kind, e.message));
+    }
+  }
+  // Every attachment failed: the caption on its own ("look at this") would send
+  // the agent off to answer a question about nothing. The failure message has
+  // already been delivered, so stop here.
+  if (attempted && !files.length) return;
+
+  let prompt = said;
+  if (files.length) {
+    const lines = files.map((f) => S.mediaLine(f.kind, f.name, f.path));
+    prompt = [said || S.mediaNoCaption(files.length), '', ...lines].join('\n');
+    await send(chatId, S.mediaSaved(files.length), { silent: true });
+  }
+  if (!prompt) return;
+
+  const wasBusy = busy(chatId);
+  enqueue({ chatId, prompt, agent: chatState(chatId).agent });
+  if (wasBusy) {
+    const ahead = queue.filter((j) => j.chatId === chatId).length;
+    await send(chatId, S.queued(ahead), { silent: true });
   }
 }
 

@@ -150,6 +150,7 @@ Khởi động lại bot. Xong.
 | Trong một chủ đề | |
 |---|---|
 | *(gõ bình thường)* | nói chuyện với phiên đó |
+| *(gửi ảnh hoặc file)* | tải về rồi đưa cho agent; chú thích chính là câu hỏi của bạn |
 | `/close` | tạm xong — dừng việc đang chạy, giữ lại mọi thứ |
 | `/drop` | xoá chủ đề, **phiên vẫn được lưu** |
 | `/rename tên mới` | đổi tên |
@@ -173,6 +174,18 @@ TGA_ALLOWED_USER_IDS=<id của bạn>
 ```
 
 Để trống thì ai trong nhóm cũng dùng được bot.
+
+## Gửi file
+
+Gửi ảnh, ảnh chụp màn hình hay tài liệu thì bot tải về một file tạm rồi đưa
+đường dẫn cho agent. Chú thích dưới ảnh chính là câu hỏi; không có chú thích thì
+nó chỉ bảo agent xem giúp. Gửi nhiều ảnh một lúc thì gộp thành **một** tin, chứ
+không phải mỗi ảnh một lượt.
+
+Sửa lại tin nhắn đã gửi cũng được tính là hỏi lại.
+
+File nằm ở `/tmp/telegram-agents-media`, tự dọn sau một ngày. Telegram giới hạn
+bot tải tối đa 20 MB — quá cỡ thì bot báo chứ không im lặng bỏ qua.
 
 ## Mô hình quyền
 
