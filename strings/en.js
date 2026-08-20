@@ -39,6 +39,8 @@ module.exports = {
   sessionEnded: (icon, id) => `${icon} session ${id}`,
   sessionUnknown: '(session unknown)',
   footerDone: (secs, tools, tag) => `✅ ${secs}s · ${tools} tool · ${tag}`,
+  footerTimedOut: (mins, tag) =>
+    `⌛ Stopped after ${mins} min — the time limit. Anything it started was killed too.\n${tag}`,
   footerStopped: (secs, tools, tag) => `🛑 stopped · ${secs}s · ${tools} tool · ${tag}`,
   footerFailed: (secs, tag) => `⚠️ ended abnormally · ${secs}s · ${tag}`,
   footerDenied: (names) => `\n🚫 denied: ${names}`,

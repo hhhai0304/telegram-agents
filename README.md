@@ -189,6 +189,12 @@ Files land in `/tmp/telegram-agents-media` and are swept after a day. Telegram
 caps a bot download at 20 MB — anything larger is refused with a message rather
 than ignored.
 
+## When a turn takes too long
+
+A turn is killed after `TGA_TIMEOUT_SEC` (30 minutes by default) and says so,
+along with anything it started — the agent runs in its own process group, so a
+dev server or a daemon it launched goes with it rather than living on.
+
 ## The permission model
 
 This is the part worth reading before you point it at a machine you care about.

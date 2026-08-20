@@ -13,4 +13,17 @@ const finish = () => {
   out({ type: 'text', part: { text: `fake-opencode says: ${prompt} (args: ${args.join(' ')})` } });
   out({ type: 'step_finish', part: { cost: 0.001 } });
 };
+// FAKE_ORPHAN leaves a grandchild holding stdout after this process exits —
+// the shape that used to wedge a conversation forever, because 'close' waits
+// for every pipe and the orphan never lets go.
+if (process.env.FAKE_ORPHAN) {
+  const { spawn } = require('child_process');
+  // detached + unref: this process exits straight away, while the orphan keeps
+  // the inherited stdout pipe open behind it.
+  const orphan = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+    stdio: ['ignore', 'inherit', 'inherit'],   // inherits OUR stdout pipe
+    detached: true,
+  });
+  orphan.unref();
+}
 if (delay) setTimeout(finish, delay); else finish();

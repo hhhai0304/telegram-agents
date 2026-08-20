@@ -135,6 +135,9 @@ const MAX_MSG = 3800;
 // runs strictly in order; this only lets DIFFERENT topics overlap. Each running
 // agent is a full CLI process, so keep it in line with the machine's RAM.
 const MAX_CONCURRENT = Math.max(1, Number(env('MAX_CONCURRENT', 2)));
+// How long to keep waiting for stdio after the agent itself has exited. Only
+// matters when something it spawned still holds the pipes open.
+const PIPE_GRACE_MS = 2000;
 
 const MODES = ['smart', 'ask', 'auto'];
 const STREAMS = ['batch', 'live'];
@@ -521,6 +524,19 @@ function pump() {
   }
 }
 
+/*
+ * Kill the agent AND anything it started.
+ *
+ * The child is spawned detached, so it leads its own process group and a
+ * negative pid reaches the whole group. Falls back to the bare child if the
+ * group is already gone.
+ */
+function killTree(child, signal) {
+  if (!child || !child.pid) return;
+  try { process.kill(-child.pid, signal); return; } catch (_) {}
+  try { child.kill(signal); } catch (_) {}
+}
+
 function toolLabel(name, input) {
   const d = describe(name, input).replace(/\s+/g, ' ').trim();
   return d ? `${name}: ${d.length > 110 ? d.slice(0, 107) + '…' : d}` : name;
@@ -593,10 +609,14 @@ async function runJob(job) {
 
   log('info', `[${chatId}] agent=${b.id} cwd=${cs.cwd} mode=${cs.mode} guard=${guard} model=${as.model || '-'} effort=${as.effort || '-'} resume=${as.sessionId || '-'}`);
 
+  // detached puts the agent in its own process group. An agent that starts a
+  // daemon (a language server, mega-cmd-server, a dev server) leaves it running
+  // when it dies; killing the group takes the whole tree with it.
   const child = spawn(backends.binFor(b), args, {
     cwd: cs.cwd,
     env: { ...process.env, ...(extraEnv || {}) },
     stdio: ['pipe', 'pipe', 'pipe'],
+    detached: true,
   });
 
   const status = await tg('sendMessage', {
@@ -628,10 +648,12 @@ async function runJob(job) {
   };
   const ticker = setInterval(() => { refreshStatus().catch(() => {}); }, 3000);
 
+  let timedOut = false;
   const timer = setTimeout(() => {
-    log('warn', `[${chatId}] timed out, killing.`);
-    try { child.kill('SIGTERM'); } catch (_) {}
-    setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 5000);
+    timedOut = true;
+    log('warn', `[${chatId}] timed out after ${TASK_TIMEOUT_MS / 1000}s, killing.`);
+    killTree(child, 'SIGTERM');
+    setTimeout(() => killTree(child, 'SIGKILL'), 5000);
   }, TASK_TIMEOUT_MS);
 
   // --- buffering the agent's text ------------------------------------------
@@ -699,12 +721,29 @@ async function runJob(job) {
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (d) => { stderr += d; if (stderr.length > 8000) stderr = stderr.slice(-8000); });
 
+  /*
+   * 'close' fires when the process is gone AND every stdio pipe is closed. A
+   * grandchild that outlives the agent inherits those pipes and holds them open
+   * for as long as it lives, so waiting on 'close' alone can wait forever: the
+   * turn never ends, the key stays in `running`, and every later message in that
+   * conversation queues behind a job that is already dead. Measured on
+   * 2026-08-20 — a turn sat at 10771s with its agent long since killed.
+   *
+   * 'exit' means the agent itself is gone. Give the pipes a moment to deliver
+   * whatever is still buffered, then finish the turn regardless.
+   */
   const code = await new Promise((resolve) => {
-    child.on('close', resolve);
-    child.on('error', (e) => { stderr += `\nspawn: ${e.message}`; resolve(-1); });
+    let settled = false;
+    const finish = (c) => { if (!settled) { settled = true; resolve(c); } };
+    child.on('close', finish);
+    child.on('exit', (c) => setTimeout(() => finish(c === null ? -1 : c), PIPE_GRACE_MS));
+    child.on('error', (e) => { stderr += `\nspawn: ${e.message}`; finish(-1); });
   });
   try { parser.end(); } catch (e) { log('warn', `parser end: ${e.message}`); }
 
+  // Whatever is left of the tree goes now: the agent is gone, and anything it
+  // started has no one left to talk to.
+  killTree(child, 'SIGKILL');
   const killedByUser = rt.killedByUser;
   clearInterval(ticker); clearTimeout(timer);
   rt.done = true;
@@ -724,7 +763,8 @@ async function runJob(job) {
     : S.sessionUnknown;
 
   let footer = S.footerDone(secs, toolCount, endTag);
-  if (killedByUser) footer = S.footerStopped(secs, toolCount, endTag);
+  if (timedOut) footer = S.footerTimedOut(Math.round(TASK_TIMEOUT_MS / 60000), endTag);
+  else if (killedByUser) footer = S.footerStopped(secs, toolCount, endTag);
   else if (code !== 0 || (finalResult && finalResult.isError)) footer = S.footerFailed(secs, endTag);
 
   const denials = (finalResult && finalResult.denials) || [];
@@ -969,7 +1009,7 @@ async function handleCommand(chatId, text) {
       // Whatever is running here dies with the topic — otherwise its output
       // would be posted into a thread nobody can read any more.
       const rt = running.get(chatId);
-      if (rt && rt.child) { rt.killedByUser = true; try { rt.child.kill('SIGTERM'); } catch (_) {} }
+      if (rt && rt.child) { rt.killedByUser = true; killTree(rt.child, 'SIGTERM'); }
       for (let i = queue.length - 1; i >= 0; i--) if (queue[i].chatId === chatId) queue.splice(i, 1);
       const name = (forum.get(raw, thread) || {}).name || String(thread);
       try {
@@ -1110,8 +1150,8 @@ async function handleCommand(chatId, text) {
       const rt = running.get(chatId);
       if (rt && rt.child) {
         rt.killedByUser = true;
-        try { rt.child.kill('SIGTERM'); } catch (_) {}
-        setTimeout(() => { try { rt.child.kill('SIGKILL'); } catch (_) {} }, 5000);
+        killTree(rt.child, 'SIGTERM');
+        setTimeout(() => killTree(rt.child, 'SIGKILL'), 5000);
         await send(chatId, S.stopping);
       } else {
         const before = queue.length;
@@ -1237,7 +1277,7 @@ async function handleCallback(q) {
     try {
       if (kind === 'c') {
         const rt = running.get(key);
-        if (rt && rt.child) { rt.killedByUser = true; try { rt.child.kill('SIGTERM'); } catch (_) {} }
+        if (rt && rt.child) { rt.killedByUser = true; killTree(rt.child, 'SIGTERM'); }
         await forum.close(raw, thread);
         await ack(S.ackTopicClosed);
       } else if (kind === 'o') {
@@ -1462,7 +1502,7 @@ function log(level, msg) { console.log(`[${new Date().toISOString()}] ${level.to
 function fatal(msg) { console.error(`FATAL ${msg}`); process.exit(1); }
 
 process.on('SIGTERM', () => {
-  for (const rt of running.values()) { try { rt.child && rt.child.kill('SIGTERM'); } catch (_) {} }
+  for (const rt of running.values()) killTree(rt.child, 'SIGTERM');
   process.exit(0);
 });
 process.on('unhandledRejection', (e) => log('error', `unhandledRejection: ${(e && e.stack) || e}`));

@@ -34,6 +34,8 @@ module.exports = {
   sessionEnded: (icon, id) => `${icon} phiên ${id}`,
   sessionUnknown: '(không rõ phiên)',
   footerDone: (secs, tools, tag) => `✅ ${secs}s · ${tools} tool · ${tag}`,
+  footerTimedOut: (mins, tag) =>
+    `⌛ Dừng sau ${mins} phút — chạm giới hạn thời gian. Mọi thứ nó khởi động cũng bị tắt theo.\n${tag}`,
   footerStopped: (secs, tools, tag) => `🛑 đã dừng · ${secs}s · ${tools} tool · ${tag}`,
   footerFailed: (secs, tag) => `⚠️ kết thúc bất thường · ${secs}s · ${tag}`,
   footerDenied: (names) => `\n🚫 bị từ chối: ${names}`,

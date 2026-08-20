@@ -187,6 +187,12 @@ Sửa lại tin nhắn đã gửi cũng được tính là hỏi lại.
 File nằm ở `/tmp/telegram-agents-media`, tự dọn sau một ngày. Telegram giới hạn
 bot tải tối đa 20 MB — quá cỡ thì bot báo chứ không im lặng bỏ qua.
 
+## Khi một lượt chạy quá lâu
+
+Quá `TGA_TIMEOUT_SEC` (mặc định 30 phút) thì lượt đó bị dừng và bot báo ra, kèm
+theo mọi thứ nó đã khởi động — agent chạy trong nhóm tiến trình riêng, nên dev
+server hay daemon nó bật lên cũng tắt theo chứ không sống sót.
+
 ## Mô hình quyền
 
 Phần này nên đọc trước khi chĩa bot vào một cái máy bạn còn quý.
