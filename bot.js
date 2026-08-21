@@ -20,6 +20,7 @@
  */
 
 const fs = require('fs');
+const { execFile } = require('child_process');
 const os = require('os');
 const http = require('http');
 const path = require('path');
@@ -58,6 +59,21 @@ loadEnvFile(path.join(HOME, '.config', 'telegram_secrets'));
 // ./strings reads TGA_LANG at require time, so it must load after config.env.
 const S = require('./strings');
 
+/** Optional: path to a money-lookup checkout enabling /tien and /them. */
+function runMoney(dir, script, args) {
+  return new Promise((resolve) => {
+    execFile('python3', [path.join(dir, script), ...args],
+      { timeout: 30000, maxBuffer: 1 << 20 },
+      (err, stdout, stderr) => {
+        const out = (stdout || '').trim();
+        if (out) return resolve(out);
+        resolve(`Lỗi: ${((stderr || '') || err?.message || '').trim().slice(0, 300)}`);
+      });
+  });
+}
+
+const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 /** TGA_<name>, falling back to the claude-telegram era CLAUDE_TG_<name>. */
 function env(name, def) {
   const v = process.env[`TGA_${name}`];
@@ -68,6 +84,8 @@ function env(name, def) {
 }
 
 const TOKEN = process.env.TG_BOT_TOKEN;
+// Unset for everyone but the author -- /tien and /them stay hidden without it.
+const MONEY_DIR = env('MONEY_DIR', '');
 const ALLOWED = new Set(
   (env('ALLOWED_CHAT_IDS', '') || process.env.TG_CHAT_ID || '')
     .split(',').map((s) => s.trim()).filter(Boolean)
@@ -805,7 +823,18 @@ async function runJob(job) {
 
 // -------------------------------------------------------------- commands ---
 
-const HELP = S.help(GUARD_MODE === 'none', AGENT_IDS.map((id) => backends.byId[id].name));
+const MONEY_MENU = MONEY_DIR ? [
+  ['tien', 'Tra cứu chi tiêu: /tien <từ khoá>'],
+  ['them', 'Ghi giao dịch: /them <số tiền> <ghi chú> | <nhóm>'],
+] : [];
+
+const HELP = S.help(GUARD_MODE === 'none', AGENT_IDS.map((id) => backends.byId[id].name))
+  + (MONEY_DIR ? [
+    '', '',
+    '💰 Chi tiêu',
+    '/tien <từ khoá> — tra cứu (không cần dấu, sai chính tả vẫn ra)',
+    '/them <số tiền> <ghi chú> | <nhóm> — ghi (500k, 1tr, không dấu = chi)',
+  ].join('\n') : '');
 
 function agentKeyboard(cs) {
   return kb(AGENT_IDS.map((id) => {
@@ -962,6 +991,30 @@ async function handleCommand(chatId, text) {
   switch (cmd) {
     case '/start': case '/help':
       await send(chatId, HELP); return true;
+
+    case '/tien': case '/tra': {
+      if (!MONEY_DIR) { await send(chatId, 'Chưa bật tra cứu chi tiêu (TGA_MONEY_DIR).'); return true; }
+      if (!arg) { await send(chatId, 'Cách dùng: /tien <từ khoá>\nVí dụ: /tien sinh nhat bi'); return true; }
+      const out = await runMoney(MONEY_DIR, 'lookup.py', arg.split(/\s+/));
+      await send(chatId, `<pre>${escHtml(out)}</pre>`, { parse_mode: 'HTML' });
+      return true;
+    }
+
+    case '/them': {
+      if (!MONEY_DIR) { await send(chatId, 'Chưa bật tra cứu chi tiêu (TGA_MONEY_DIR).'); return true; }
+      // "/them -500k Sinh nhật Bi | Lì xì" -- text after "|" is the category.
+      const [body, category] = arg.split('|').map((s) => s.trim());
+      const words = (body || '').split(/\s+/).filter(Boolean);
+      if (words.length < 2) {
+        await send(chatId, 'Cách dùng: /them <số tiền> <ghi chú> | <nhóm>\nVí dụ: /them -500k Sinh nhật Bi 2026 | Lì xì');
+        return true;
+      }
+      const argv = [...words];
+      if (category) argv.push('-c', category);
+      const out = await runMoney(MONEY_DIR, 'add.py', argv);
+      await send(chatId, `<pre>${escHtml(out)}</pre>`, { parse_mode: 'HTML' });
+      return true;
+    }
 
     case '/agent': case '/agents': {
       if (arg) {
@@ -1488,7 +1541,7 @@ async function handleMessage(rawChat, msgs) {
 async function registerCommands() {
   try {
     await tg('setMyCommands', {
-      commands: S.menuCommands.map(([command, description]) => ({ command, description })),
+      commands: [...S.menuCommands, ...MONEY_MENU].map(([command, description]) => ({ command, description })),
     });
   } catch (e) {
     log('warn', `setMyCommands failed: ${(e && e.message) || e}`);
