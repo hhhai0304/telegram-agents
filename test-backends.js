@@ -24,8 +24,8 @@ function collect(b, chunks) {
 const types = (evs) => evs.map((e) => e.type);
 
 // ---------------------------------------------------------------- registry ---
-test('registry has the four agents', () => {
-  assert.deepStrictEqual(backends.ALL.map((b) => b.id), ['claude', 'opencode', 'kilo', 'kiro']);
+test('registry has the five agents', () => {
+  assert.deepStrictEqual(backends.ALL.map((b) => b.id), ['claude', 'opencode', 'kilo', 'kiro', 'commandcode']);
   for (const b of backends.ALL) {
     for (const k of ['buildArgs', 'listSessions', 'createParser', 'isSessionGone', 'sessionLabel']) {
       assert.strictEqual(typeof b[k], 'function', `${b.id}.${k}`);
@@ -166,6 +166,55 @@ test('kiro: text parsing strips ANSI, spinners, counts tools', () => {
 });
 test('kiro: no output still yields session + result', () => {
   assert.deepStrictEqual(types(collect(kiro, [])), ['session', 'result']);
+});
+
+// ------------------------------------------------------------ commandcode ---
+const commandcode = backends.byId.commandcode;
+test('commandcode: -p carries the prompt, model/effort arrive as flags', () => {
+  const { args, env } = commandcode.buildArgs({ prompt: 'fix the bug', model: 'deepseek/deepseek-v4-flash', effort: 'high', sessionId: null });
+  assert.deepStrictEqual(args, [
+    '-p', 'fix the bug', '--output-format', 'json', '--tools-all', '--trust', '--skip-onboarding',
+    '--model', 'deepseek/deepseek-v4-flash', '--effort', 'high',
+  ]);
+  assert.strictEqual(commandcode.stdinPrompt, false);
+  assert.deepStrictEqual(env, {});
+});
+test('commandcode: the prompt reaches the CLI even with no model or effort', () => {
+  const { args } = commandcode.buildArgs({ prompt: 'hello', model: '', effort: '', sessionId: null });
+  assert.strictEqual(args[args.indexOf('-p') + 1], 'hello');
+  assert.ok(!args.includes('--model'));
+  assert.ok(!args.includes('--effort'));
+});
+test('commandcode: resume flag', () => {
+  const { args } = commandcode.buildArgs({ prompt: 'x', model: '', effort: '', sessionId: 'abc-123' });
+  assert.deepStrictEqual(args.slice(-2), ['--resume', 'abc-123']);
+});
+test('commandcode: json event stream parsing', () => {
+  const lines = [
+    JSON.stringify({ type: 'event', event: { type: 'run_start', sessionId: 'sess-1' } }),
+    JSON.stringify({ type: 'event', event: { type: 'message_end', content: [{ type: 'text', text: 'Hello' }, { type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] } }),
+    'garbage line',
+    JSON.stringify({ type: 'result', subtype: 'success', sessionId: 'sess-1', finalText: 'done' }),
+  ];
+  const evs = collect(commandcode, [lines.slice(0, 2).join('\n') + '\n', lines.slice(2).join('\n')]);
+  assert.deepStrictEqual(types(evs), ['session', 'text', 'tool', 'noise', 'session', 'result']);
+  assert.deepStrictEqual(evs[1], { type: 'text', text: 'Hello' });
+  assert.deepStrictEqual(evs[2], { type: 'tool', name: 'Bash', input: { command: 'ls' } });
+  assert.deepStrictEqual(evs[5], { type: 'result', costUsd: 0, isError: false, text: 'done', denials: [] });
+});
+test('commandcode: a failed run marks the result as an error', () => {
+  const evs = collect(commandcode, [JSON.stringify({ type: 'result', subtype: 'error_max_turns', finalText: 'stopped' }) + '\n']);
+  assert.strictEqual(evs[evs.length - 1].isError, true);
+});
+test('commandcode: /model offers a shortlist but stays open to any id', () => {
+  assert.strictEqual(commandcode.modelsOpen, true);
+  assert.strictEqual(commandcode.defaultModel, 'deepseek/deepseek-v4-flash');
+  assert.ok(commandcode.models.includes('deepseek/deepseek-v4.1-flash'));
+  for (const m of commandcode.models) assert.ok(Buffer.byteLength(`m:${m}`) <= 64, m);
+});
+test('commandcode: stale session detection', () => {
+  assert.ok(commandcode.isSessionGone('session not found', 1));
+  assert.ok(!commandcode.isSessionGone('session not found', 0));
 });
 
 // --------------------------------------------- opencode-family guard flag ---

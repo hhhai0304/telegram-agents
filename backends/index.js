@@ -36,6 +36,7 @@ const ALL = [
   require('./opencode.js'),
   require('./kilo.js'),
   require('./kiro.js'),
+  require('./commandcode.js'),
 ];
 
 const byId = Object.fromEntries(ALL.map((b) => [b.id, b]));
