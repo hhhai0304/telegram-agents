@@ -194,6 +194,14 @@ module.exports = {
   // Slash-command menu published to Telegram with setMyCommands on every boot.
   // Keep it in sync with handleCommand(); a stale menu autocompletes commands
   // this bot does not have, and unknown commands are sent to the agent as text.
+  // Wake-on-LAN
+  wakePick: 'Wake which machine?',
+  wakeNone: 'No wakeable machines configured (TGA_WAKE_DEVICES).',
+  wakeUnknown: (arg, names) => `Unknown machine "${arg}". Known: ${names.join(', ')}`,
+  wakeAlready: (name) => `${name} is already on — no need to wake it.`,
+  wakeSent: (name, mac) => `Magic packet sent to ${name} (${mac}). Give it ~30s to boot.`,
+  wakeFailed: (name, err) => `Waking ${name} failed: ${err}`,
+
   menuCommands: [
     ['agent', 'Switch coding agent'],
     ['model', 'Show or set the model for this agent'],

@@ -828,12 +828,33 @@ const MONEY_MENU = MONEY_DIR ? [
   ['them', 'Ghi giao dịch: /them <số tiền> <ghi chú> | <nhóm>'],
 ] : [];
 
+// TGA_WAKE_DEVICES: "Name=AA:BB:CC:DD:EE:FF@192.168.50.x;Name2=..." — keep in
+// sync with UpSnap (~/upsnap), whose PocketBase db is root-owned and unreadable
+// by this service.
+const WAKE_DEVICES = (env('WAKE_DEVICES', '') || '')
+  .split(';')
+  .map((entry) => entry.trim())
+  .filter(Boolean)
+  .map((entry) => {
+    const [name, rest] = entry.split('=').map((s) => s.trim());
+    const [mac, ip] = (rest || '').split('@').map((s) => s.trim());
+    return name && mac ? { name, mac: mac.replace(/-/g, ':'), ip } : null;
+  })
+  .filter(Boolean);
+const WAKE_MENU = WAKE_DEVICES.length ? [['wake', `Wake máy: ${WAKE_DEVICES.map((d) => d.name).join(', ')}`]] : [];
+
 const HELP = S.help(GUARD_MODE === 'none', AGENT_IDS.map((id) => backends.byId[id].name))
   + (MONEY_DIR ? [
     '', '',
     '💰 Chi tiêu',
     '/tien <từ khoá> — tra cứu (không cần dấu, sai chính tả vẫn ra)',
     '/them <số tiền> <ghi chú> | <nhóm> — ghi (500k, 1tr, không dấu = chi)',
+  ].join('\n') : '')
+  + (WAKE_DEVICES.length ? [
+    '', '',
+    '⚡ Wake máy',
+    '/wake — danh sách máy, bấm nút để wake (chỉ 1 máy thì wake luôn)',
+    '/wake <tên> — wake máy theo tên',
   ].join('\n') : '');
 
 function agentKeyboard(cs) {
@@ -977,6 +998,19 @@ async function sendSessionList(chatId) {
   await tg('sendMessage', {
     ...route(chatId), text: chunk(lines.join('\n'))[0],
     disable_web_page_preview: true, ...kb(buttons),
+  });
+}
+
+/** Ping the device, then either report it is up or send the magic packet. */
+async function wakeDevice(key, d) {
+  const online = await new Promise((resolve) => {
+    if (!d.ip) return resolve(false);
+    execFile('ping', ['-c', '1', '-W', '1', d.ip], { timeout: 5000 }, (err) => resolve(!err));
+  });
+  if (online) { await send(key, S.wakeAlready(d.name)); return; }
+  execFile('wakeonlan', [d.mac], { timeout: 10000 }, (err) => {
+    if (err) send(key, S.wakeFailed(d.name, err.message)).catch(() => {});
+    else send(key, S.wakeSent(d.name, d.mac)).catch(() => {});
   });
 }
 
@@ -1214,6 +1248,25 @@ async function handleCommand(chatId, text) {
       return true;
     }
 
+    case '/wake': {
+      if (!WAKE_DEVICES.length) { await send(chatId, S.wakeNone); return true; }
+      if (!arg) {
+        if (WAKE_DEVICES.length === 1) { await wakeDevice(chatId, WAKE_DEVICES[0]); return true; }
+        await tg('sendMessage', {
+          ...route(chatId),
+          text: S.wakePick,
+          ...kb(WAKE_DEVICES.map((d) => [{ text: d.name, callback_data: `w:${d.name}` }])),
+        });
+        return true;
+      }
+      const lower = arg.toLowerCase();
+      const d = WAKE_DEVICES.find((x) => x.name.toLowerCase().includes(lower))
+        || (WAKE_DEVICES.length === 1 ? WAKE_DEVICES[0] : null);
+      if (!d) { await send(chatId, S.wakeUnknown(arg, WAKE_DEVICES.map((x) => x.name))); return true; }
+      await wakeDevice(chatId, d);
+      return true;
+    }
+
     default:
       return false;
   }
@@ -1253,6 +1306,16 @@ async function handleCallback(q) {
     pend.resolve(verdict);
     await ack(note);
     await edit(`${note}\n\n${pend.label}`);
+    return;
+  }
+
+  // Wake decision
+  if (data.startsWith('w:')) {
+    const name = data.slice(2);
+    const d = WAKE_DEVICES.find((x) => x.name === name);
+    if (!d) { await ack(S.wakeNone); return; }
+    await ack('…');
+    await wakeDevice(chatId, d);
     return;
   }
 
@@ -1541,7 +1604,7 @@ async function handleMessage(rawChat, msgs) {
 async function registerCommands() {
   try {
     await tg('setMyCommands', {
-      commands: [...S.menuCommands, ...MONEY_MENU].map(([command, description]) => ({ command, description })),
+      commands: [...S.menuCommands, ...MONEY_MENU, ...WAKE_MENU].map(([command, description]) => ({ command, description })),
     });
   } catch (e) {
     log('warn', `setMyCommands failed: ${(e && e.message) || e}`);

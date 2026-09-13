@@ -174,6 +174,14 @@ module.exports = {
   ackTopicRestored: 'Đã khôi phục.',
   ackTopicForgotten: 'Đã quên.',
 
+  // Wake-on-LAN
+  wakePick: 'Wake máy nào?',
+  wakeNone: 'Chưa cấu hình máy nào để wake (TGA_WAKE_DEVICES).',
+  wakeUnknown: (arg, names) => `Không rõ máy "${arg}". Có: ${names.join(', ')}`,
+  wakeAlready: (name) => `${name} đang bật rồi, không cần wake.`,
+  wakeSent: (name, mac) => `Đã gửi magic packet tới ${name} (${mac}). Chờ ~30s máy mới lên được.`,
+  wakeFailed: (name, err) => `Wake ${name} thất bại: ${err}`,
+
   menuCommands: [
     ['agent', 'Chuyển agent'],
     ['model', 'Xem hoặc đặt model cho agent hiện tại'],
