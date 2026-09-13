@@ -28,6 +28,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const risk = require('./risk.js');
 const backends = require('./backends');
+const { renderMarkdown, chunkHtml } = require('./format.js');
 const makeForum = require('./forum.js');
 const makeMedia = require('./media.js');
 const { keyOf, route, chatIdOf, threadOf, isTopic } = makeForum;
@@ -335,6 +336,35 @@ async function send(key, text, { silent = false, notifyOnlyLast = false, ...extr
 }
 
 const kb = (rows) => ({ reply_markup: { inline_keyboard: rows } });
+
+/**
+ * Send agent prose, with its Markdown rendered as the HTML subset Telegram
+ * accepts. Models are not told where their output is going, so they write
+ * `**bold**` and ``` fences; plain text shows those as literal punctuation.
+ * The bot's own strings keep using send(): they are already final text.
+ *
+ * Anything Telegram refuses to parse falls back to the raw text -- a reply
+ * with visible asterisks beats no reply at all.
+ */
+async function sendRich(key, text, { silent = false, notifyOnlyLast = false } = {}) {
+  const parts = chunkHtml(renderMarkdown(text), MAX_MSG).filter((p) => p.trim());
+  if (!parts.length) return send(key, text, { silent, notifyOnlyLast });
+  let last = null;
+  for (let i = 0; i < parts.length; i++) {
+    const isLast = i === parts.length - 1;
+    try {
+      last = await tg('sendMessage', {
+        ...route(key), text: parts[i], parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        disable_notification: silent || (notifyOnlyLast && !isLast),
+      });
+    } catch (e) {
+      if (i === 0) return send(key, text, { silent, notifyOnlyLast });
+      throw e;
+    }
+  }
+  return last;
+}
 
 // ---------------------------------------------------------- approval gate ---
 
@@ -691,7 +721,7 @@ async function runJob(job) {
     sentAnything = true;
     if (!silent) notified = true;
     sendChain = sendChain.then(() =>
-      send(chatId, text, { silent, notifyOnlyLast: !silent })
+      sendRich(chatId, text, { silent, notifyOnlyLast: !silent })
         .catch((e) => log('warn', `send failed: ${e.message}`)));
     return sendChain;
   };
@@ -700,7 +730,7 @@ async function runJob(job) {
   const sendOrdered = (text) => {
     notified = true;
     sendChain = sendChain.then(() =>
-      send(chatId, text).catch((e) => log('warn', `send failed: ${e.message}`)));
+      sendRich(chatId, text).catch((e) => log('warn', `send failed: ${e.message}`)));
     return sendChain;
   };
 
@@ -800,7 +830,7 @@ async function runJob(job) {
     const fallback = (finalResult && finalResult.text) ||
       (stderr.trim() ? `stderr:\n${stderr.trim().slice(-1500)}` : S.noOutput);
     notified = true;
-    await send(chatId, fallback, { notifyOnlyLast: true }).catch(() => {});
+    await sendRich(chatId, fallback, { notifyOnlyLast: true }).catch(() => {});
   } else if (code !== 0 && stderr.trim() && !killedByUser) {
     // Text came out but the process still failed: append the tail of stderr, silently.
     await send(chatId, `stderr:\n${stderr.trim().slice(-1500)}`, { silent: true }).catch(() => {});

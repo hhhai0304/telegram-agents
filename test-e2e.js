@@ -95,8 +95,11 @@ const api = http.createServer((req, res) => {
       TGA_AGENTS: '', TGA_AGENT: 'claude',
       // Kilo has no fake CLI: the test asserts it shows up as NOT installed, so
       // pin its binary to a path that cannot exist. Without this the assertion
-      // depends on whether the host happens to have `kilo` on PATH.
+      // depends on whether the host happens to have `kilo` on PATH. Claude and
+      // Command Code get the same treatment for the same reason.
       TGA_KILO_BIN: '/nonexistent/kilo',
+      TGA_CLAUDE_BIN: '/nonexistent/claude',
+      TGA_COMMANDCODE_BIN: '/nonexistent/command-code',
       // Between them these three exercise every branch of the price label:
       // `:free` suffix, a prefix declared free, and a model that bills.
       TGA_OPENCODE_MODEL: 'z-ai/glm-5.2:free',
@@ -136,6 +139,16 @@ const api = http.createServer((req, res) => {
     assert.ok(edits.some((e) => /✅ \d+s · 1 tool · ↩️ session fake01|✅ \d+s · 1 tool · 🆕 session fake01/.test(e.text)), edits.map((e) => e.text).join('\n'));
   });
   test('opencode: audit lists the bash call', () => assert.ok(edits.some((e) => /Touched:\n• Bash: rm -rf \/tmp\/x/.test(e.text))));
+  test('agent prose goes out as Telegram HTML', () => {
+    const m = sent.find((x) => /fake-opencode says: hello one/.test(x.text));
+    assert.ok(m, 'no reply');
+    assert.strictEqual(m.parse_mode, 'HTML');
+  });
+  test("the bot's own strings stay plain text", () => {
+    const m = sent.find((x) => /Tap one to switch/.test(x.text));
+    assert.ok(m, 'no agent list');
+    assert.strictEqual(m.parse_mode, undefined);
+  });
   test('every turn opens with the CLI, the model, and whether it bills', () => {
     // `:free` marks itself; anything else bills unless TGA_FREE_MODELS says so.
     assert.ok(texts.some((t) => /^⏳ .*· OpenCode · glm-5\.2:free · 🆓 free$/m.test(t)), texts.join('\n'));
@@ -160,9 +173,10 @@ const api = http.createServer((req, res) => {
     const m = sent.find((x) => /Current agent: Kiro CLI/.test(x.text));
     assert.ok(m, 'no agent list');
     assert.ok(/• Kilo CLI ✗ not installed/.test(m.text), m.text);
+    assert.ok(/• Command Code ✗ not installed/.test(m.text), m.text);
     assert.ok(/• OpenCode — model gemini-3\.7-flash · session fake01/.test(m.text), m.text);
     const rows = m.reply_markup.inline_keyboard.map((r) => r[0].text);
-    assert.deepStrictEqual(rows, ['Claude Code', 'OpenCode', 'Kilo CLI ✗', '● Kiro CLI']);
+    assert.deepStrictEqual(rows, ['Claude Code ✗', 'OpenCode', 'Kilo CLI ✗', '● Kiro CLI', 'Command Code ✗']);
   });
   test('switching back to claude keeps its own (empty) session', () => {
     const t = texts.filter((x) => /^🧠 Claude Code\n/.test(x)).pop();
