@@ -248,10 +248,10 @@ test('opencode: the same plugin lookup applies, per CLI config dir', () => {
 // ------------------------------------------------------- kilo model shortlist ---
 test('kilo: /model offers a shortlist but stays open to any id', () => {
   const kilo = backends.byId.kilo;
-  assert.strictEqual(kilo.defaultModel, 'openrouter/openrouter/auto');
-  assert.ok(kilo.models.includes('openrouter/anthropic/claude-opus-5'));
-  assert.ok(kilo.models.includes('google/gemini-3.7-flash'));
-  assert.ok(kilo.models.includes('openrouter/z-ai/glm-5.2:free'));
+  assert.strictEqual(kilo.defaultModel, 'openrouter/deepseek/deepseek-v4-flash-0731');
+  assert.ok(kilo.models.includes('openrouter/moonshotai/kimi-k3'));
+  assert.ok(kilo.models.includes('openrouter/deepseek/deepseek-v4-pro-0813'));
+  assert.ok(kilo.models.includes('openrouter/qwen/qwen3.7-plus'));
   assert.strictEqual(kilo.modelsOpen, true, 'typing another id must still work');
   // Telegram rejects callback_data over 64 bytes; `m:` + the id must fit.
   for (const m of kilo.models) assert.ok(Buffer.byteLength(`m:${m}`) <= 64, m);
@@ -259,7 +259,7 @@ test('kilo: /model offers a shortlist but stays open to any id', () => {
 test('kilo: the default model reaches the CLI as --model', () => {
   const kilo = backends.byId.kilo;
   const { args } = kilo.buildArgs({ prompt: 'x', model: kilo.defaultModel, sessionId: null });
-  assert.strictEqual(args[args.indexOf('--model') + 1], 'openrouter/openrouter/auto');
+  assert.strictEqual(args[args.indexOf('--model') + 1], 'openrouter/deepseek/deepseek-v4-flash-0731');
 });
 test('opencode: unchanged, no shortlist of its own', () => {
   assert.deepStrictEqual(backends.byId.opencode.models, []);
