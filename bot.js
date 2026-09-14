@@ -23,6 +23,7 @@ const fs = require('fs');
 const { execFile } = require('child_process');
 const os = require('os');
 const dns = require('dns');
+const https = require('https');
 const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
@@ -40,6 +41,10 @@ const { keyOf, route, chatIdOf, threadOf, isTopic } = makeForum;
 // was fine). Preferring IPv4 in resolution order fixes it; a healthy v6 network
 // still works because v4 failure falls back the other way.
 try { dns.setDefaultResultOrder('ipv4first'); } catch (_) {}
+// ...but ordering alone was not enough (still ETIMEDOUT 2026-09-14): with Happy
+// Eyeballs on, undici races the dead v6 address. Off = first answer wins, which
+// under ipv4first is the v4 one.
+try { require('net').setDefaultAutoSelectFamily(false); } catch (_) {}
 
 // ---------------------------------------------------------------- config ---
 
@@ -305,16 +310,38 @@ function clearGrants(chatId) { sessionGrants.delete(grantKey(chatId)); }
 
 // -------------------------------------------------------------- telegram ---
 
+/*
+ * https.request instead of undici fetch: undici's connect timeout is a fixed
+ * ~10s, which dies whenever this link hits a loss burst (the Telegram route is
+ * lossy/high-RTT from here). The kernel stack retries SYNs far longer, which
+ * is why curl always got through while fetch timed out (2026-09-14).
+ * family:4 because the v6 route is dead outright.
+ */
+function tgOnce(method, body) {
+  const payload = JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const req = https.request(`${API}/${method}`, {
+      method: 'POST',
+      family: 4,
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) },
+      timeout: 150000, // socket inactivity — must exceed the 50s getUpdates long-poll
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch (e) { reject(new Error(`${method}: bad json`)); }
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error(`${method}: socket timeout`)));
+    req.on('error', reject);
+    req.end(payload);
+  });
+}
+
 async function tg(method, body, { retries = 3 } = {}) {
   for (let attempt = 0; ; attempt++) {
     try {
-      const res = await fetch(`${API}/${method}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(70000),
-      });
-      const json = await res.json();
+      const json = await tgOnce(method, body);
       if (!json.ok) {
         const after = json.parameters && json.parameters.retry_after;
         if (after && attempt < retries) { await sleep((after + 1) * 1000); continue; }
