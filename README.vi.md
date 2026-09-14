@@ -2,8 +2,9 @@
 
 Một bot Telegram, nhiều CLI coding agent. Nhắn cho bot, nó chạy
 [Claude Code](https://claude.com/claude-code), [OpenCode](https://opencode.ai),
-[Kilo CLI](https://kilo.ai) hoặc [Kiro CLI](https://kiro.dev) trên máy bạn, bắn tiến độ về, và —
-với Claude Code — hỏi duyệt bằng nút bấm trước khi làm việc nguy hiểm. `/agent` để chuyển qua lại;
+[Kilo CLI](https://kilo.ai), [Kiro CLI](https://kiro.dev) hoặc [Devin](https://devin.ai) trên máy bạn,
+bắn tiến độ về, và —
+với Claude Code và Devin — hỏi duyệt bằng nút bấm trước khi làm việc nguy hiểm. `/agent` để chuyển qua lại;
 mỗi agent giữ phiên riêng.
 
 **Không phụ thuộc npm package nào.** Chỉ dùng builtin của Node. Là bản kế nhiệm của
@@ -16,14 +17,15 @@ bạn (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ clau
                      │         backends/opencode.js  ──▶ opencode run --format json --auto
                      │         backends/kilo.js      ──▶ kilo run --format json --auto
                      │         backends/kiro.js      ──▶ kiro-cli chat --no-interactive --trust-all-tools
+                     │         backends/devin.js     ──▶ devin -p --permission-mode dangerous --export F
                      ▲
-                  nút bấm ◀── approve-hook.js ──▶ risk.js      (chỉ Claude Code)
+                  nút bấm ◀── approve-hook.js ──▶ risk.js      (Claude Code và Devin)
 ```
 
 ## Được gì
 
 - **CLI thật**, không phải vỏ chat — tool thật, file thật, shell thật, trên máy bạn.
-- **`/agent` để chuyển** giữa Claude Code, OpenCode, Kilo, Kiro theo từng chat. Mỗi agent giữ
+- **`/agent` để chuyển** giữa Claude Code, OpenCode, Kilo, Kiro, Devin theo từng chat. Mỗi agent giữ
   phiên, model, effort riêng, chuyển lại là chạy tiếp chỗ cũ. Agent chưa cài vẫn hiện, đánh dấu ✗,
   và từ chối chạy.
 - **Phiên nối tiếp.** `/sessions` liệt kê phiên gần đây của agent hiện tại, bấm để chạy tiếp.
@@ -44,8 +46,11 @@ bạn (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ clau
 | OpenCode | `opencode` | `opencode run --format json --auto` | liệt kê + resume theo id | ✅ nếu cài plugin cổng duyệt | `/model provider/model` |
 | Kilo CLI | `kilo` | `kilo run --format json --auto` | như OpenCode | ✅ nếu cài plugin cổng duyệt | nút chọn sẵn vài model, `/model <id bất kỳ>` cho phần còn lại |
 | Kiro CLI | `kiro` | `kiro-cli chat --no-interactive --trust-all-tools` | mỗi thư mục một cuộc, `--resume` | ✗ luôn trust hết tool | `/model <tên>` |
+| Devin | `devin` | `devin -p --permission-mode dangerous --export F` | liệt kê + resume theo id (`-r`) | ✅ qua hook `PreToolUse`/`PermissionRequest` | nút chọn sẵn vài model, `/model <id bất kỳ>` cho phần còn lại |
 
-Claude Code được xích bằng hook `PreToolUse`. Họ OpenCode không có hook đó, nhưng có plugin, và
+Claude Code được xích bằng hook `PreToolUse`; Devin cũng dùng event đó cộng thêm
+`PermissionRequest` (`approve-hook-devin.js` trong `~/.config/devin/config.json`, tự ngủ trong
+các phiên chạy tay). Họ OpenCode không có hook đó, nhưng có plugin, và
 `tool.execute.before` của plugin có quyền chặn một tool call — đó là việc của
 `plugin/telegram-agents-guard.mjs`, dùng lại đúng `risk.js` và đúng mấy cái nút Telegram. Phải tự
 bật: cài plugin cho từng CLI (xem [Mô hình quyền](#mô-hình-quyền)) thì agent chuyển từ *thả xích*

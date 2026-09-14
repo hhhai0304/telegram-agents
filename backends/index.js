@@ -5,7 +5,8 @@
  * Every backend module exports the same small interface (see claude.js for the
  * reference implementation and comments):
  *
- *   id            'claude' | 'opencode' | 'kilo' | 'kiro'  — used in /agent and state
+ *   id            'claude' | 'opencode' | 'kilo' | 'kiro' | 'commandcode' | 'devin'
+ *                 — used in /agent and state
  *   name          human label
  *   bin           executable name; overridable with TGA_<ID>_BIN
  *   models        [] = free text via `/model <name>`; non-empty = buttons
@@ -17,7 +18,8 @@
  *   stdinPrompt   true  = pipe the prompt on stdin, false = pass it as an argument
  *   buildArgs(ctx)        -> { args, env }
  *   listSessions(cwd, n)  -> [{ id, title, mtime }]
- *   createParser(emit)    -> { feed(str), end() }  emitting normalized events:
+ *   createParser(emit, ctx) -> { feed(str), end() }  emitting normalized events:
+ *                             (ctx is optional: { chatId } — only Devin uses it)
  *       { type: 'session', id }
  *       { type: 'text', text }
  *       { type: 'tool', name, input }        name/input in Claude Code vocabulary
@@ -37,6 +39,7 @@ const ALL = [
   require('./kilo.js'),
   require('./kiro.js'),
   require('./commandcode.js'),
+  require('./devin.js'),
 ];
 
 const byId = Object.fromEntries(ALL.map((b) => [b.id, b]));

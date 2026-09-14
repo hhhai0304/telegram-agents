@@ -647,7 +647,7 @@ async function runJob(job) {
   const guard = guardFor(cs, b);
   const { args, env: extraEnv } = b.buildArgs({
     prompt, model: as.model, effort: as.effort, sessionId: as.sessionId,
-    guardMode: GUARD_MODE, mode: cs.mode, settingsFile: SETTINGS_FILE,
+    guardMode: GUARD_MODE, mode: cs.mode, settingsFile: SETTINGS_FILE, chatId,
     hookEnv: {
       TGA_APPROVE_URL: `http://127.0.0.1:${APPROVE_PORT}/approve`,
       TGA_APPROVE_TOKEN: APPROVE_TOKEN,
@@ -769,7 +769,7 @@ async function runJob(job) {
     }
   };
 
-  const parser = b.createParser(handleEvent);
+  const parser = b.createParser(handleEvent, { chatId });
   child.stdin.on('error', () => {});
   child.stdin.end(b.stdinPrompt ? prompt : '');
   child.stdout.setEncoding('utf8');

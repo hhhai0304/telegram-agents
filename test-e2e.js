@@ -100,6 +100,7 @@ const api = http.createServer((req, res) => {
       TGA_KILO_BIN: '/nonexistent/kilo',
       TGA_CLAUDE_BIN: '/nonexistent/claude',
       TGA_COMMANDCODE_BIN: '/nonexistent/command-code',
+      TGA_DEVIN_BIN: '/nonexistent/devin',
       // Between them these three exercise every branch of the price label:
       // `:free` suffix, a prefix declared free, and a model that bills.
       TGA_OPENCODE_MODEL: 'z-ai/glm-5.2:free',
@@ -176,7 +177,7 @@ const api = http.createServer((req, res) => {
     assert.ok(/• Command Code ✗ not installed/.test(m.text), m.text);
     assert.ok(/• OpenCode — model gemini-3\.7-flash · session fake01/.test(m.text), m.text);
     const rows = m.reply_markup.inline_keyboard.map((r) => r[0].text);
-    assert.deepStrictEqual(rows, ['Claude Code ✗', 'OpenCode', 'Kilo CLI ✗', '● Kiro CLI', 'Command Code ✗']);
+    assert.deepStrictEqual(rows, ['Claude Code ✗', 'OpenCode', 'Kilo CLI ✗', '● Kiro CLI', 'Command Code ✗', 'Devin ✗']);
   });
   test('switching back to claude keeps its own (empty) session', () => {
     const t = texts.filter((x) => /^🧠 Claude Code\n/.test(x)).pop();

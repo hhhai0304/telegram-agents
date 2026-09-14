@@ -2,9 +2,10 @@
 
 One Telegram bot, several coding-agent CLIs. Message your bot and it runs
 [Claude Code](https://claude.com/claude-code), [OpenCode](https://opencode.ai),
-[Kilo CLI](https://kilo.ai) or [Kiro CLI](https://kiro.dev) on your machine, streams progress
-back, and — for Claude Code — asks for permission with inline buttons before doing anything
-dangerous. `/agent` switches between them; each keeps its own session.
+[Kilo CLI](https://kilo.ai), [Kiro CLI](https://kiro.dev) or [Devin](https://devin.ai) on your
+machine, streams progress
+back, and — for Claude Code and Devin — asks for permission with inline buttons before doing
+anything dangerous. `/agent` switches between them; each keeps its own session.
 
 **Zero npm dependencies.** Node builtins only. Successor of
 [claude-telegram](https://github.com/hhhai0304/claude-telegram), which it can replace in place.
@@ -16,14 +17,15 @@ you (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude
                      │         backends/opencode.js  ──▶ opencode run --format json --auto
                      │         backends/kilo.js      ──▶ kilo run --format json --auto
                      │         backends/kiro.js      ──▶ kiro-cli chat --no-interactive --trust-all-tools
+                     │         backends/devin.js     ──▶ devin -p --permission-mode dangerous --export F
                      ▲
-                  buttons ◀── approve-hook.js ──▶ risk.js      (Claude Code only)
+                  buttons ◀── approve-hook.js ──▶ risk.js      (Claude Code and Devin)
 ```
 
 ## What you get
 
 - **The real CLIs**, not a chat wrapper — real tools, real files, real shell, on your box.
-- **`/agent` to switch** between Claude Code, OpenCode, Kilo and Kiro per chat. Every agent keeps
+- **`/agent` to switch** between Claude Code, OpenCode, Kilo, Kiro and Devin per chat. Every agent keeps
   its own session, model and effort, so switching back resumes where you left off. Agents that
   aren't installed still show up, marked ✗, and refuse to run.
 - **Sessions that persist.** `/sessions` lists recent ones for the current agent, tap to continue.
@@ -44,8 +46,11 @@ you (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude
 | OpenCode | `opencode` | `opencode run --format json --auto` | list + resume by id | ✅ with the guard plugin | `/model provider/model` |
 | Kilo CLI | `kilo` | `kilo run --format json --auto` | same as OpenCode | ✅ with the guard plugin | buttons for a shortlist, `/model <any id>` for the rest |
 | Kiro CLI | `kiro` | `kiro-cli chat --no-interactive --trust-all-tools` | one per directory, `--resume` | ✗ always trusts all tools | `/model <name>` |
+| Devin | `devin` | `devin -p --permission-mode dangerous --export F` | list + resume by id (`-r`) | ✅ via `PreToolUse`/`PermissionRequest` hook | buttons for a shortlist, `/model <any id>` for the rest |
 
-Claude Code is gated through its `PreToolUse` hook. The OpenCode family has no such hook, but it
+Claude Code is gated through its `PreToolUse` hook; Devin through the same event plus
+`PermissionRequest` (`approve-hook-devin.js` in `~/.config/devin/config.json`, inert for
+interactive runs). The OpenCode family has no such hook, but it
 does have plugins, and a plugin's `tool.execute.before` can refuse a tool call — that is what
 `plugin/telegram-agents-guard.mjs` does, reusing the same `risk.js` and the same Telegram buttons.
 It is opt-in: install it per CLI (see [The permission model](#the-permission-model)) and the agent
