@@ -202,6 +202,13 @@ module.exports = {
   wakeSent: (name, mac) => `Magic packet sent to ${name} (${mac}). Give it ~30s to boot.`,
   wakeFailed: (name, err) => `Waking ${name} failed: ${err}`,
 
+  // PC displays + ambilight (/monitor_on, /monitor_off)
+  monitorNone: 'No display-control host configured (TGA_MONITOR_SSH).',
+  monitorFailed: (err) => `Monitor command failed: ${err}`,
+  monitorDone: (on, state) => state
+    ? `Displays + ambilight: ${state === 'on' ? 'ON' : 'OFF'}.`
+    : `${on ? 'On' : 'Off'} command sent — could not read the state back.`,
+
   menuCommands: [
     ['agent', 'Switch coding agent'],
     ['model', 'Show or set the model for this agent'],

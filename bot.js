@@ -873,6 +873,15 @@ const WAKE_DEVICES = (env('WAKE_DEVICES', '') || '')
   .filter(Boolean);
 const WAKE_MENU = WAKE_DEVICES.length ? [['wake', `Wake máy: ${WAKE_DEVICES.map((d) => d.name).join(', ')}`]] : [];
 
+// TGA_MONITOR_SSH: ssh host alias of the Windows PC whose displays + ambilight
+// are toggled by the scheduled tasks MonitorPower-On / MonitorPower-Off.
+// Empty = the /monitor_* commands stay hidden.
+const MONITOR_SSH = env('MONITOR_SSH', '');
+const MONITOR_MENU = MONITOR_SSH ? [
+  ['monitor_on', 'Bật màn hình PC + LED'],
+  ['monitor_off', 'Tắt màn hình PC + LED'],
+] : [];
+
 const HELP = S.help(GUARD_MODE === 'none', AGENT_IDS.map((id) => backends.byId[id].name))
   + (MONEY_DIR ? [
     '', '',
@@ -885,6 +894,12 @@ const HELP = S.help(GUARD_MODE === 'none', AGENT_IDS.map((id) => backends.byId[i
     '⚡ Wake máy',
     '/wake — danh sách máy, bấm nút để wake (chỉ 1 máy thì wake luôn)',
     '/wake <tên> — wake máy theo tên',
+  ].join('\n') : '')
+  + (MONITOR_SSH ? [
+    '', '',
+    '🖥️ Màn hình PC',
+    '/monitor_on (= /monitor-on) — bật 2 màn hình + ambilight',
+    '/monitor_off (= /monitor-off) — tắt cả hai',
   ].join('\n') : '');
 
 function agentKeyboard(cs) {
@@ -1042,6 +1057,28 @@ async function wakeDevice(key, d) {
     if (err) send(key, S.wakeFailed(d.name, err.message)).catch(() => {});
     else send(key, S.wakeSent(d.name, d.mac)).catch(() => {});
   });
+}
+
+function sshMonitor(remoteCmd) {
+  return new Promise((resolve) => {
+    execFile('ssh', [MONITOR_SSH, remoteCmd], { timeout: 30000, maxBuffer: 1 << 20 },
+      (err, stdout, stderr) => resolve({
+        ok: !err,
+        out: (stdout || '').trim(),
+        err: (((stderr || '') || '') + (err ? `\n${err.message}` : '')).trim(),
+      }));
+  });
+}
+
+async function monitorToggle(key, on) {
+  const run = await sshMonitor(`schtasks /run /tn MonitorPower-${on ? 'On' : 'Off'}`);
+  if (!run.ok) { await send(key, S.monitorFailed(run.err || run.out || 'ssh')); return; }
+  // The panels change ~5-10 s after schtasks returns (link retrain + the
+  // double D6 send), so the state is only read back once it has settled.
+  await new Promise((r) => setTimeout(r, 12000));
+  const st = await sshMonitor('powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Tools\\Get-MonitorState.ps1');
+  const state = st.ok && /^(on|off)$/i.test(st.out) ? st.out.toLowerCase() : null;
+  await send(key, S.monitorDone(on, state));
 }
 
 async function handleCommand(chatId, text) {
@@ -1294,6 +1331,15 @@ async function handleCommand(chatId, text) {
         || (WAKE_DEVICES.length === 1 ? WAKE_DEVICES[0] : null);
       if (!d) { await send(chatId, S.wakeUnknown(arg, WAKE_DEVICES.map((x) => x.name))); return true; }
       await wakeDevice(chatId, d);
+      return true;
+    }
+
+    // Telegram command names may only contain [a-z0-9_]; the hyphen spellings
+    // still work when typed, they just cannot be registered in the bot menu.
+    case '/monitor-on': case '/monitor_on':
+    case '/monitor-off': case '/monitor_off': {
+      if (!MONITOR_SSH) { await send(chatId, S.monitorNone); return true; }
+      await monitorToggle(chatId, cmd.endsWith('on'));
       return true;
     }
 
@@ -1634,7 +1680,7 @@ async function handleMessage(rawChat, msgs) {
 async function registerCommands() {
   try {
     await tg('setMyCommands', {
-      commands: [...S.menuCommands, ...MONEY_MENU, ...WAKE_MENU].map(([command, description]) => ({ command, description })),
+      commands: [...S.menuCommands, ...MONEY_MENU, ...WAKE_MENU, ...MONITOR_MENU].map(([command, description]) => ({ command, description })),
     });
   } catch (e) {
     log('warn', `setMyCommands failed: ${(e && e.message) || e}`);
