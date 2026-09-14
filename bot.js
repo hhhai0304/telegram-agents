@@ -22,6 +22,7 @@
 const fs = require('fs');
 const { execFile } = require('child_process');
 const os = require('os');
+const dns = require('dns');
 const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
@@ -32,6 +33,13 @@ const { renderMarkdown, chunkHtml } = require('./format.js');
 const makeForum = require('./forum.js');
 const makeMedia = require('./media.js');
 const { keyOf, route, chatIdOf, threadOf, isTopic } = makeForum;
+
+// This box has DNS-visible IPv6 for api.telegram.org but no working IPv6 route:
+// undici's Happy Eyeballs kept dying on the v6 address instead of falling back
+// to IPv4 (observed 2026-09-14 — getUpdates failing for ~30min while curl -4
+// was fine). Preferring IPv4 in resolution order fixes it; a healthy v6 network
+// still works because v4 failure falls back the other way.
+try { dns.setDefaultResultOrder('ipv4first'); } catch (_) {}
 
 // ---------------------------------------------------------------- config ---
 
