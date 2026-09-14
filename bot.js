@@ -81,6 +81,21 @@ function runMoney(dir, script, args) {
   });
 }
 
+/** Runs <dir>/venv/bin/python commute.py; Waze calls can take a minute. */
+function runCommute(dir, direction) {
+  return new Promise((resolve) => {
+    execFile(path.join(dir, 'venv', 'bin', 'python'), [path.join(dir, 'commute.py'), direction, '--send'],
+      { timeout: 180000, maxBuffer: 1 << 20 },
+      (err, stdout, stderr) => {
+        const errText = ((stderr || '') || '').trim();
+        if (err || /error|traceback/i.test(errText)) {
+          return resolve(`Lỗi: ${errText.slice(-300) || err?.message || 'unknown'}`);
+        }
+        resolve((stdout || '').trim());
+      });
+  });
+}
+
 const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** TGA_<name>, falling back to the claude-telegram era CLAUDE_TG_<name>. */
@@ -95,6 +110,10 @@ function env(name, def) {
 const TOKEN = process.env.TG_BOT_TOKEN;
 // Unset for everyone but the author -- /tien and /them stay hidden without it.
 const MONEY_DIR = env('MONEY_DIR', '');
+// Same idea for /di and /ve: path to the commute checkout. The script delivers
+// the full report (text + camera photos) to TG_CHAT_ID itself; the bot only
+// relays its stdout, which stays empty on success.
+const COMMUTE_DIR = env('COMMUTE_DIR', '');
 const ALLOWED = new Set(
   (env('ALLOWED_CHAT_IDS', '') || process.env.TG_CHAT_ID || '')
     .split(',').map((s) => s.trim()).filter(Boolean)
@@ -866,6 +885,11 @@ const MONEY_MENU = MONEY_DIR ? [
   ['them', 'Ghi giao dịch: /them <số tiền> <ghi chú> | <nhóm>'],
 ] : [];
 
+const COMMUTE_MENU = COMMUTE_DIR ? [
+  ['di', 'Tuyến đi làm: nhà → công ty'],
+  ['ve', 'Tuyến về: công ty → nhà'],
+] : [];
+
 // TGA_WAKE_DEVICES: "Name=AA:BB:CC:DD:EE:FF@192.168.50.x;Name2=..." — keep in
 // sync with UpSnap (~/upsnap), whose PocketBase db is root-owned and unreadable
 // by this service.
@@ -896,6 +920,12 @@ const HELP = S.help(GUARD_MODE === 'none', AGENT_IDS.map((id) => backends.byId[i
     '💰 Chi tiêu',
     '/tien <từ khoá> — tra cứu (không cần dấu, sai chính tả vẫn ra)',
     '/them <số tiền> <ghi chú> | <nhóm> — ghi (500k, 1tr, không dấu = chi)',
+  ].join('\n') : '')
+  + (COMMUTE_DIR ? [
+    '', '',
+    '🛵 Đi lại',
+    '/di — so sánh tuyến nhà → công ty (traffic + mưa + ảnh camera)',
+    '/ve — chiều về công ty → nhà',
   ].join('\n') : '')
   + (WAKE_DEVICES.length ? [
     '', '',
@@ -1122,6 +1152,16 @@ async function handleCommand(chatId, text) {
       if (category) argv.push('-c', category);
       const out = await runMoney(MONEY_DIR, 'add.py', argv);
       await send(chatId, `<pre>${escHtml(out)}</pre>`, { parse_mode: 'HTML' });
+      return true;
+    }
+
+    case '/di': case '/ve': {
+      if (!COMMUTE_DIR) { await send(chatId, 'Chưa bật gợi ý tuyến đường (TGA_COMMUTE_DIR).'); return true; }
+      await send(chatId, '🛵 Đang đo traffic + chụp camera…');
+      const out = await runCommute(COMMUTE_DIR, cmd === '/di' ? 'go' : 'back');
+      // Success = the script already pushed the report itself; only failures
+      // come back as text worth relaying.
+      if (out) await send(chatId, `<pre>${escHtml(out)}</pre>`, { parse_mode: 'HTML' });
       return true;
     }
 
@@ -1688,7 +1728,7 @@ async function handleMessage(rawChat, msgs) {
 async function registerCommands() {
   try {
     await tg('setMyCommands', {
-      commands: [...S.menuCommands, ...MONEY_MENU, ...WAKE_MENU, ...MONITOR_MENU].map(([command, description]) => ({ command, description })),
+      commands: [...S.menuCommands, ...MONEY_MENU, ...COMMUTE_MENU, ...WAKE_MENU, ...MONITOR_MENU].map(([command, description]) => ({ command, description })),
     });
   } catch (e) {
     log('warn', `setMyCommands failed: ${(e && e.message) || e}`);
