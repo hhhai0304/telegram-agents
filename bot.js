@@ -1151,13 +1151,13 @@ async function monitorToggle(key, on) {
 }
 
 // One-shot OS switch on the dual-boot PC. Linux runs ~/bin/boot-windows.sh
-// (efibootmgr BootNext); Windows runs D:\Boot-ToLinux.ps1 (bcdedit
+// (efibootmgr BootNext); Windows runs C:\Tools\Boot-ToLinux.ps1 (bcdedit
 // bootsequence). Both defer the actual reboot by a few seconds so the SSH
 // channel closes cleanly before the machine goes down.
 async function bootSwitch(key, toWindows) {
   const remoteCmd = toWindows
     ? 'bash ~/bin/boot-windows.sh'
-    : 'powershell -NoProfile -ExecutionPolicy Bypass -File D:\\Boot-ToLinux.ps1';
+    : 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Tools\\Boot-ToLinux.ps1';
   const run = await sshMonitor(remoteCmd);
   const os = toWindows ? 'Windows' : 'Linux';
   await send(key, run.ok
