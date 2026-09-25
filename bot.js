@@ -939,6 +939,8 @@ const MONITOR_SSH = env('MONITOR_SSH', '');
 const MONITOR_MENU = MONITOR_SSH ? [
   ['monitor_on', 'Bật màn hình PC + LED'],
   ['monitor_off', 'Tắt màn hình PC + LED'],
+  ['boot_windows', 'Reboot PC một lần vào Windows'],
+  ['boot_linux', 'Reboot PC một lần vào Linux'],
 ] : [];
 
 const HELP = S.help(GUARD_MODE === 'none', AGENT_IDS.map((id) => backends.byId[id].name))
@@ -965,6 +967,8 @@ const HELP = S.help(GUARD_MODE === 'none', AGENT_IDS.map((id) => backends.byId[i
     '🖥️ Màn hình PC',
     '/monitor_on (= /monitor-on) — bật 2 màn hình + ambilight',
     '/monitor_off (= /monitor-off) — tắt cả hai',
+    '/boot_windows — reboot PC một lần vào Windows',
+    '/boot_linux — reboot PC một lần vào Linux',
   ].join('\n') : '');
 
 function agentKeyboard(cs) {
@@ -1144,6 +1148,21 @@ async function monitorToggle(key, on) {
   const st = await sshMonitor('powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Tools\\Get-MonitorState.ps1');
   const state = st.ok && /^(on|off)$/i.test(st.out) ? st.out.toLowerCase() : null;
   await send(key, S.monitorDone(on, state));
+}
+
+// One-shot OS switch on the dual-boot PC. Linux runs ~/bin/boot-windows.sh
+// (efibootmgr BootNext); Windows runs D:\Boot-ToLinux.ps1 (bcdedit
+// bootsequence). Both defer the actual reboot by a few seconds so the SSH
+// channel closes cleanly before the machine goes down.
+async function bootSwitch(key, toWindows) {
+  const remoteCmd = toWindows
+    ? 'bash ~/bin/boot-windows.sh'
+    : 'powershell -NoProfile -ExecutionPolicy Bypass -File D:\\Boot-ToLinux.ps1';
+  const run = await sshMonitor(remoteCmd);
+  const os = toWindows ? 'Windows' : 'Linux';
+  await send(key, run.ok
+    ? `🔁 PC đang reboot vào ${os} (boot kế tiếp vẫn về OS mặc định)`
+    : `❌ ${os} boot switch failed: ${run.err || run.out || 'ssh'}`);
 }
 
 async function handleCommand(chatId, text) {
@@ -1415,6 +1434,13 @@ async function handleCommand(chatId, text) {
     case '/monitor-off': case '/monitor_off': {
       if (!MONITOR_SSH) { await send(chatId, S.monitorNone); return true; }
       await monitorToggle(chatId, cmd.endsWith('on'));
+      return true;
+    }
+
+    case '/boot-windows': case '/boot_windows':
+    case '/boot-linux': case '/boot_linux': {
+      if (!MONITOR_SSH) { await send(chatId, S.monitorNone); return true; }
+      await bootSwitch(chatId, cmd.endsWith('windows'));
       return true;
     }
 
