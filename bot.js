@@ -932,7 +932,7 @@ const WAKE_DEVICES = (env('WAKE_DEVICES', '') || '')
   .filter(Boolean);
 const WAKE_MENU = WAKE_DEVICES.length ? [['wake', `Wake máy: ${WAKE_DEVICES.map((d) => d.name).join(', ')}`]] : [];
 
-// TGA_MONITOR_SSH: ssh host alias of the Windows PC whose displays + ambilight
+// TGA_MONITOR_SSH: ssh host alias of the PC whose displays + ambilight
 // are toggled by the scheduled tasks MonitorPower-On / MonitorPower-Off.
 // Empty = the /monitor_* commands stay hidden.
 const MONITOR_SSH = env('MONITOR_SSH', '');
@@ -1140,12 +1140,12 @@ function sshMonitor(remoteCmd) {
 }
 
 async function monitorToggle(key, on) {
-  const run = await sshMonitor(`schtasks /run /tn MonitorPower-${on ? 'On' : 'Off'}`);
+  const run = await sshMonitor(`bash ~/bin/monitor-${on ? 'on' : 'off'}.sh`);
   if (!run.ok) { await send(key, S.monitorFailed(run.err || run.out || 'ssh')); return; }
-  // The panels change ~5-10 s after schtasks returns (link retrain + the
-  // double D6 send), so the state is only read back once it has settled.
-  await new Promise((r) => setTimeout(r, 12000));
-  const st = await sshMonitor('powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Tools\\Get-MonitorState.ps1');
+  // kscreen-doctor DPMS settles in ~1-2 s; the settle wait also gives the
+  // HyperHDR JSON-RPC LEDDEVICE call inside the script time to land.
+  await new Promise((r) => setTimeout(r, 6000));
+  const st = await sshMonitor('bash ~/bin/monitor-state.sh');
   const state = st.ok && /^(on|off)$/i.test(st.out) ? st.out.toLowerCase() : null;
   await send(key, S.monitorDone(on, state));
 }
