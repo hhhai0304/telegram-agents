@@ -30,6 +30,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const risk = require('./risk.js');
 const backends = require('./backends');
+const herdr = require('./herdr.js');
 const { renderMarkdown, chunkHtml } = require('./format.js');
 const makeForum = require('./forum.js');
 const makeMedia = require('./media.js');
@@ -320,7 +321,9 @@ function clearGrants(chatId) { sessionGrants.delete(grantKey(chatId)); }
 function tgOnce(method, body) {
   const payload = JSON.stringify(body);
   return new Promise((resolve, reject) => {
-    const req = https.request(`${API}/${method}`, {
+    // http: is only reachable through TGA_TELEGRAM_API — the fake API the e2e
+    // tests point the bot at. Real config always lands on https.
+    const req = (API.startsWith('https:') ? https : http).request(`${API}/${method}`, {
       method: 'POST',
       family: 4,
       headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) },
@@ -634,7 +637,9 @@ function pump() {
  * group is already gone.
  */
 function killTree(child, signal) {
-  if (!child || !child.pid) return;
+  if (!child) return;
+  if (child._herdr) { herdr.kill(child, signal); return; }
+  if (!child.pid) return;
   try { process.kill(-child.pid, signal); return; } catch (_) {}
   try { child.kill(signal); } catch (_) {}
 }
@@ -714,12 +719,26 @@ async function runJob(job) {
   // detached puts the agent in its own process group. An agent that starts a
   // daemon (a language server, mega-cmd-server, a dev server) leaves it running
   // when it dies; killing the group takes the whole tree with it.
-  const child = spawn(backends.binFor(b), args, {
-    cwd: cs.cwd,
-    env: { ...process.env, ...(extraEnv || {}) },
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: true,
-  });
+  const bin = backends.binFor(b);
+  const runEnv = { ...process.env, ...(extraEnv || {}) };
+  let child = null;
+  if (herdr.enabled()) {
+    try {
+      child = await herdr.launch({
+        bin, args, cwd: cs.cwd, env: runEnv, prompt,
+        stdinPrompt: b.stdinPrompt, label: `tg:${b.id}:${chatId}`,
+      });
+    } catch (e) {
+      log('warn', `[${chatId}] herdr unavailable (${e.message}); direct spawn.`);
+    }
+  }
+  if (!child) {
+    child = spawn(bin, args, {
+      cwd: cs.cwd, env: runEnv,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true,
+    });
+  }
 
   const status = await tg('sendMessage', {
     ...route(chatId), text: S.working(sessionTag), disable_notification: true,
