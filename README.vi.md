@@ -2,7 +2,8 @@
 
 Một bot Telegram, nhiều CLI coding agent. Nhắn cho bot, nó chạy
 [Claude Code](https://claude.com/claude-code), [OpenCode](https://opencode.ai),
-[Kiro CLI](https://kiro.dev) hoặc [Devin](https://devin.ai) trên máy bạn,
+[Kiro CLI](https://kiro.dev), [Devin](https://devin.ai), [OMP](https://omp.sh) hoặc
+[Antigravity](https://antigravity.google) trên máy bạn,
 bắn tiến độ về, và —
 với Claude Code và Devin — hỏi duyệt bằng nút bấm trước khi làm việc nguy hiểm. `/agent` để chuyển qua lại;
 mỗi agent giữ phiên riêng.
@@ -17,6 +18,8 @@ bạn (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ clau
                      │         backends/opencode.js  ──▶ opencode run --format json --auto
                      │         backends/kiro.js      ──▶ kiro-cli chat --no-interactive --trust-all-tools
                      │         backends/devin.js     ──▶ devin -p --permission-mode dangerous --export F
+                     │         backends/omp.js       ──▶ omp -p --mode json --auto-approve
+                     │         backends/antigravity.js ──▶ agy --print P --output-format stream-json
                      ▲
                   nút bấm ◀── approve-hook.js ──▶ risk.js      (Claude Code và Devin)
 ```
@@ -24,11 +27,12 @@ bạn (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ clau
 ## Được gì
 
 - **CLI thật**, không phải vỏ chat — tool thật, file thật, shell thật, trên máy bạn.
-- **`/agent` để chuyển** giữa Claude Code, OpenCode, Kiro, Devin theo từng chat. Mỗi agent giữ
+- **`/agent` để chuyển** giữa Claude Code, OpenCode, Kiro, Devin, OMP, Antigravity theo từng chat. Mỗi agent giữ
   phiên, model, effort riêng, chuyển lại là chạy tiếp chỗ cũ. Agent chưa cài vẫn hiện, đánh dấu ✗,
   và từ chối chạy.
 - **Phiên nối tiếp.** `/sessions` liệt kê phiên gần đây của agent hiện tại, bấm để chạy tiếp.
-  Claude Code, OpenCode và Devin resume theo id; Kiro resume cuộc trò chuyện gần nhất trong thư mục.
+  Claude Code, OpenCode, Devin, OMP, Antigravity resume theo id; Kiro resume cuộc trò chuyện gần
+  nhất trong thư mục.
 - **Lớp duyệt quyền làm cho điện thoại** — với Claude Code. `risk.js` phân loại từng tool call; việc
   nguy hiểm biến thành nút Cho phép / Từ chối ngay trong chat. Không bấm = **từ chối**.
 - **Tiến độ trực tiếp.** Dòng trạng thái đếm giây, đếm tool, hiện tool đang chạy. Cuối mỗi lượt có
@@ -45,6 +49,8 @@ bạn (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ clau
 | OpenCode | `opencode` | `opencode run --format json --auto` | liệt kê + resume theo id | ✅ nếu cài plugin cổng duyệt | `/model provider/model` |
 | Kiro CLI | `kiro` | `kiro-cli chat --no-interactive --trust-all-tools` | mỗi thư mục một cuộc, `--resume` | ✗ luôn trust hết tool | `/model <tên>` |
 | Devin | `devin` | `devin -p --permission-mode dangerous --export F` | liệt kê + resume theo id (`-r`) | ✅ qua hook `PreToolUse`/`PermissionRequest` | nút chọn sẵn vài model, `/model <id bất kỳ>` cho phần còn lại |
+| OMP | `omp` | `omp -p --mode json --auto-approve` | liệt kê + resume theo id (`-r`) | ✗ `--auto-approve` | nút `adaptive` + `/model <id bất kỳ>`; `/effort` map sang `--thinking` |
+| Antigravity | `antigravity` | `agy --print P --output-format stream-json` | resume bằng `--conversation <id>` | ✗ headless bắt buộc `--dangerously-skip-permissions` | `/model` + `/effort low|medium|high` |
 
 Claude Code được xích bằng hook `PreToolUse`; Devin cũng dùng event đó cộng thêm
 `PermissionRequest` (`approve-hook-devin.js` trong `~/.config/devin/config.json`, tự ngủ trong
@@ -52,8 +58,9 @@ các phiên chạy tay). Họ OpenCode không có hook đó, nhưng có plugin, 
 `tool.execute.before` của plugin có quyền chặn một tool call — đó là việc của
 `plugin/telegram-agents-guard.mjs`, dùng lại đúng `risk.js` và đúng mấy cái nút Telegram. Phải tự
 bật: cài plugin cho từng CLI (xem [Mô hình quyền](#mô-hình-quyền)) thì agent chuyển từ *thả xích*
-sang có xích; không cài thì chúng chạy `--auto` và danh sách `/agent` ghi rõ. Kiro không có cả hook
-lẫn plugin nên luôn thả xích. `/effort` chỉ Claude Code mới có.
+sang có xích; không cài thì chúng chạy `--auto` và danh sách `/agent` ghi rõ. Kiro, OMP và
+Antigravity không có cả hook lẫn plugin nên luôn thả xích. `/effort` có cho Claude Code, OMP
+(`--thinking`) và Antigravity (`--effort`).
 
 Danh sách phiên lấy theo kho của từng CLI: OpenCode ghi ra file JSON, còn vài fork cất phiên trong
 SQLite và chỉ lộ ra qua `session list --format json`; adapter thử file trước, hụt thì gọi CLI.
@@ -61,15 +68,19 @@ SQLite và chỉ lộ ra qua `session list --format json`; adapter thử file tr
 Kiro in chữ thường chứ không có event; bot lột màu và spinner, gửi câu trả lời khi lượt kết thúc,
 đếm dòng `Using tool:` để dòng tiến độ vẫn nhúc nhích.
 
-> Adapter OpenCode và Kiro viết theo cờ headless trong tài liệu của họ và test bằng CLI giả,
-> chưa chạy trên máy có đủ cả bốn. Nếu cái nào trục trặc trên máy bạn, `journalctl` có nguyên dòng
-> lệnh và stderr — mở issue kèm cái đó.
+`--mode json` của OMP đã bắt từ output thật; envelope stream-json của Antigravity
+(`init`/`step_update`/`result`, kèm fallback text thường cho bản cũ) theo đúng tài liệu headless.
+
+> Adapter OpenCode, Kiro và Antigravity viết theo cờ headless trong tài liệu của họ và test bằng
+> CLI giả, chưa chạy trên máy cài đủ hết. Nếu cái nào trục trặc trên máy bạn, `journalctl` có
+> nguyên dòng lệnh và stderr — mở issue kèm cái đó.
 
 ## Cần gì
 
 - Linux hoặc macOS, **Node >= 18** (có systemd thì tiện hơn)
 - Ít nhất một CLI agent đã cài và đăng nhập:
-  `npm i -g @anthropic-ai/claude-code` · `npm i -g opencode-ai` · Kiro từ kiro.dev
+  `npm i -g @anthropic-ai/claude-code` · `npm i -g opencode-ai` · Kiro từ kiro.dev ·
+  `bun install -g omp` (omp.sh) · Antigravity CLI `agy` từ antigravity.google
 - Bot token lấy từ [@BotFather](https://t.me/BotFather)
 
 ## Cài
@@ -251,7 +262,7 @@ thích đầy đủ). Không muốn để token trong thư mục repo thì đặ
 | `TGA_ALLOWED_CHAT_IDS` | — | Chat id được ra lệnh, cách nhau bằng dấu phẩy |
 | `TGA_ALLOWED_USER_IDS` | rỗng | Danh sách user id được phép; rỗng = ai trong các chat đó cũng được |
 | `TGA_MAX_CONCURRENT` | `2` | Số agent chạy cùng lúc; trong một chủ đề vẫn tuần tự |
-| `TGA_AGENTS` | tất cả | Agent nào hiện trong `/agent`: `claude,opencode,kiro,devin` |
+| `TGA_AGENTS` | tất cả | Agent nào hiện trong `/agent`: `claude,opencode,kiro,devin,omp,antigravity` |
 | `TGA_AGENT` | `claude` | Agent mặc định cho chat mới |
 | `TGA_<AGENT>_BIN` | — | Đường dẫn file chạy, ví dụ `TGA_CLAUDE_BIN=/home/me/.local/bin/claude` |
 | `TGA_<AGENT>_MODEL` | claude: `sonnet`, còn lại: trống | Model mặc định từng agent; trống = để CLI tự chọn |

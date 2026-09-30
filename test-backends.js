@@ -24,8 +24,8 @@ function collect(b, chunks, ctx) {
 const types = (evs) => evs.map((e) => e.type);
 
 // ---------------------------------------------------------------- registry ---
-test('registry has the four agents', () => {
-  assert.deepStrictEqual(backends.ALL.map((b) => b.id), ['claude', 'opencode', 'kiro', 'devin']);
+test('registry has the six agents', () => {
+  assert.deepStrictEqual(backends.ALL.map((b) => b.id), ['claude', 'opencode', 'kiro', 'devin', 'omp', 'antigravity']);
   for (const b of backends.ALL) {
     for (const k of ['buildArgs', 'listSessions', 'createParser', 'isSessionGone', 'sessionLabel']) {
       assert.strictEqual(typeof b[k], 'function', `${b.id}.${k}`);
@@ -260,6 +260,88 @@ test('devin: guard mirrors whether the hook is in the devin config', () => {
   fs.writeFileSync(path.join(cfg, 'config.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: 'node /x/approve-hook-devin.js' }] }] } }));
   assert.strictEqual(run(), 'true');
   fs.rmSync(home, { recursive: true, force: true });
+});
+
+// --------------------------------------------------------------------- omp ---
+const omp = backends.byId.omp;
+
+test('omp: -p --mode json --auto-approve, prompt after --', () => {
+  const { args } = omp.buildArgs({ prompt: 'fix it', model: '', effort: '', sessionId: null });
+  assert.deepStrictEqual(args, ['-p', '--mode', 'json', '--auto-approve', '--', 'fix it']);
+  assert.strictEqual(omp.stdinPrompt, false);
+});
+test('omp: model + thinking + resume flags', () => {
+  const { args } = omp.buildArgs({ prompt: 'x', model: 'adaptive', effort: 'high', sessionId: 'abc' });
+  assert.deepStrictEqual(args, ['-p', '--mode', 'json', '--auto-approve',
+    '--model', 'adaptive', '--thinking', 'high', '-r', 'abc', '--', 'x']);
+});
+test('omp: parser reads the verified NDJSON event shapes', () => {
+  const evs = [];
+  const p = omp.createParser((e) => evs.push(e));
+  p.feed([
+    { type: 'session', id: 'abc123', cwd: '/tmp' },
+    { type: 'message_update', assistantMessageEvent: { type: 'toolcall_end', contentIndex: 0,
+      toolCall: { name: 'bash', arguments: { command: 'ls' } } } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_end', contentIndex: 1, content: 'done' } },
+    { type: 'message_end', message: { role: 'assistant', usage: { cost: { total: 0.5 } }, stopReason: 'stop' } },
+    { type: 'agent_end', messages: [], isTerminal: true },
+  ].map(JSON.stringify).join('\n') + '\n');
+  p.end();
+  assert.deepStrictEqual(types(evs), ['session', 'tool', 'text', 'result']);
+  assert.strictEqual(evs[1].name, 'Bash');
+  assert.strictEqual(evs[2].text, 'done');
+  assert.strictEqual(evs[3].costUsd, 0.5);
+});
+test('omp: stale session detection', () => {
+  assert.ok(omp.isSessionGone('Error: session abc not found', 1));
+  assert.ok(!omp.isSessionGone('session not found', 0));
+});
+
+// ------------------------------------------------------------- antigravity ---
+const agy = backends.byId.antigravity;
+
+test('antigravity: --print eats the next token — prompt immediately follows it', () => {
+  const { args } = agy.buildArgs({ prompt: 'fix it', model: '', effort: '', sessionId: null });
+  assert.strictEqual(args[0], '--print');
+  assert.strictEqual(args[1], 'fix it');
+  assert.ok(args.includes('--dangerously-skip-permissions'));
+  assert.ok(args.includes('stream-json'));
+});
+test('antigravity: model + effort + conversation flags', () => {
+  const { args } = agy.buildArgs({ prompt: 'x', model: 'gemini-3.7-flash', effort: 'high', sessionId: 'conv1' });
+  assert.strictEqual(args[args.indexOf('--model') + 1], 'gemini-3.7-flash');
+  assert.strictEqual(args[args.indexOf('--effort') + 1], 'high');
+  assert.strictEqual(args[args.indexOf('--conversation') + 1], 'conv1');
+});
+test('antigravity: parser folds init/step_update/result', () => {
+  const evs = [];
+  const p = agy.createParser((e) => evs.push(e));
+  p.feed([
+    { event: 'init', conversation_id: 'conv-9', init: { cwd: '/tmp' } },
+    { event: 'step_update', step_update: { step_index: 1, state: 'ACTIVE', step_type: 'tool', tool: 'run_command', args: { command: 'ls' } } },
+    { event: 'step_update', step_update: { step_index: 2, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'hel' } },
+    { event: 'step_update', step_update: { step_index: 2, state: 'DONE', step_type: 'agent_response', text_delta: 'lo' } },
+    { event: 'result', result: { status: 'SUCCESS', response: 'hello', usage: { total_tokens: 10 } } },
+  ].map(JSON.stringify).join('\n') + '\n');
+  p.end();
+  assert.deepStrictEqual(types(evs), ['session', 'tool', 'text', 'text', 'result']);
+  assert.strictEqual(evs[1].name, 'run_command');
+  assert.strictEqual(evs[2].text + evs[3].text, 'hello');
+  assert.strictEqual(evs[4].isError, false);
+});
+test('antigravity: result error + plain-text fallback line', () => {
+  const evs = [];
+  const p = agy.createParser((e) => evs.push(e));
+  p.feed('plain answer\n' + JSON.stringify({ event: 'result', result: { status: 'FAILED', error: 'boom' } }) + '\n');
+  p.end();
+  assert.strictEqual(evs[0].type, 'text');
+  assert.strictEqual(evs[0].text, 'plain answer');
+  assert.strictEqual(evs[1].isError, true);
+  assert.strictEqual(evs[1].text, 'boom');
+});
+test('antigravity: stale session detection', () => {
+  assert.ok(agy.isSessionGone('conversation 123 not found', 1));
+  assert.ok(!agy.isSessionGone('conversation not found', 0));
 });
 
 console.log(`1..${n}`);

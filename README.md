@@ -2,7 +2,8 @@
 
 One Telegram bot, several coding-agent CLIs. Message your bot and it runs
 [Claude Code](https://claude.com/claude-code), [OpenCode](https://opencode.ai),
-[Kiro CLI](https://kiro.dev) or [Devin](https://devin.ai) on your
+[Kiro CLI](https://kiro.dev), [Devin](https://devin.ai), [OMP](https://omp.sh) or
+[Antigravity](https://antigravity.google) on your
 machine, streams progress
 back, and — for Claude Code and Devin — asks for permission with inline buttons before doing
 anything dangerous. `/agent` switches between them; each keeps its own session.
@@ -17,6 +18,8 @@ you (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude
                      │         backends/opencode.js  ──▶ opencode run --format json --auto
                      │         backends/kiro.js      ──▶ kiro-cli chat --no-interactive --trust-all-tools
                      │         backends/devin.js     ──▶ devin -p --permission-mode dangerous --export F
+                     │         backends/omp.js       ──▶ omp -p --mode json --auto-approve
+                     │         backends/antigravity.js ──▶ agy --print P --output-format stream-json
                      ▲
                   buttons ◀── approve-hook.js ──▶ risk.js      (Claude Code and Devin)
 ```
@@ -24,11 +27,12 @@ you (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude
 ## What you get
 
 - **The real CLIs**, not a chat wrapper — real tools, real files, real shell, on your box.
-- **`/agent` to switch** between Claude Code, OpenCode, Kiro and Devin per chat. Every agent keeps
+- **`/agent` to switch** between Claude Code, OpenCode, Kiro, Devin, OMP and Antigravity per chat. Every agent keeps
   its own session, model and effort, so switching back resumes where you left off. Agents that
   aren't installed still show up, marked ✗, and refuse to run.
 - **Sessions that persist.** `/sessions` lists recent ones for the current agent, tap to continue.
-  Claude Code, OpenCode and Devin resume by id; Kiro resumes the last conversation in the directory.
+  Claude Code, OpenCode, Devin, OMP and Antigravity resume by id; Kiro resumes the last
+  conversation in the directory.
 - **A permission layer built for a phone** — for Claude Code. `risk.js` classifies every tool call;
   risky ones turn into an Approve/Deny button in the chat. Approvals fail *closed*.
 - **Live progress.** A status line ticks with elapsed time, tool count, and current tool. A recap
@@ -45,6 +49,8 @@ you (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude
 | OpenCode | `opencode` | `opencode run --format json --auto` | list + resume by id | ✅ with the guard plugin | `/model provider/model` |
 | Kiro CLI | `kiro` | `kiro-cli chat --no-interactive --trust-all-tools` | one per directory, `--resume` | ✗ always trusts all tools | `/model <name>` |
 | Devin | `devin` | `devin -p --permission-mode dangerous --export F` | list + resume by id (`-r`) | ✅ via `PreToolUse`/`PermissionRequest` hook | buttons for a shortlist, `/model <any id>` for the rest |
+| OMP | `omp` | `omp -p --mode json --auto-approve` | list + resume by id (`-r`) | ✗ `--auto-approve` | `adaptive` button + `/model <any id>`; `/effort` maps to `--thinking` |
+| Antigravity | `antigravity` | `agy --print P --output-format stream-json` | resume by `--conversation <id>` | ✗ `--dangerously-skip-permissions` required headless | `/model` + `/effort low|medium|high` |
 
 Claude Code is gated through its `PreToolUse` hook; Devin through the same event plus
 `PermissionRequest` (`approve-hook-devin.js` in `~/.config/devin/config.json`, inert for
@@ -53,7 +59,8 @@ does have plugins, and a plugin's `tool.execute.before` can refuse a tool call �
 `plugin/telegram-agents-guard.mjs` does, reusing the same `risk.js` and the same Telegram buttons.
 It is opt-in: install it per CLI (see [The permission model](#the-permission-model)) and the agent
 switches from *off the leash* to guarded; without it these agents run `--auto` and the `/agent`
-list says so. Kiro has neither hook nor plugin and is always unleashed. `/effort` is Claude-only.
+list says so. Kiro, OMP and Antigravity have neither hook nor plugin and are always unleashed.
+`/effort` works for Claude and OMP (`--thinking`) and Antigravity (`--effort`).
 
 Session lists come from whatever store the CLI uses: OpenCode writes JSON files, while some
 forks keep sessions in SQLite and only expose them through `session list --format json`; the
@@ -62,15 +69,20 @@ adapter tries the files first and falls back to the CLI.
 Kiro prints plain text rather than events; the bot strips the colours and spinners and delivers
 the answer when the turn ends, counting `Using tool:` lines for the progress ticker.
 
-> The OpenCode and Kiro adapters were written against their documented headless flags and
-> tested against fakes, not against a machine with all four installed. If one of them misbehaves on
-> your box, `journalctl` shows the exact command line and stderr — open an issue with that.
+OMP's `--mode json` was captured live; Antigravity's stream-json envelope (`init`/`step_update`/
+`result`, plus a plain-text fallback for older builds) follows the documented headless format.
+
+> The OpenCode, Kiro and Antigravity adapters were written against their documented headless flags
+> and tested against fakes, not against a machine with all of them installed. If one of them
+> misbehaves on your box, `journalctl` shows the exact command line and stderr — open an issue
+> with that.
 
 ## Requirements
 
 - Linux or macOS with **Node >= 18** (systemd optional but recommended)
 - At least one agent CLI installed and logged in:
-  `npm i -g @anthropic-ai/claude-code` · `npm i -g opencode-ai` · Kiro from kiro.dev
+  `npm i -g @anthropic-ai/claude-code` · `npm i -g opencode-ai` · Kiro from kiro.dev ·
+  `bun install -g omp` (omp.sh) · Antigravity CLI `agy` from antigravity.google
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
 
 ## Install
@@ -256,7 +268,7 @@ token out of the repo directory, `~/.config/telegram_secrets` is read as a secon
 | `TGA_ALLOWED_CHAT_IDS` | — | Comma-separated chat ids allowed to drive the bot |
 | `TGA_ALLOWED_USER_IDS` | empty | Comma-separated user ids allowed to drive it; empty = anyone in those chats |
 | `TGA_MAX_CONCURRENT` | `2` | Agents that may run at once; one topic still runs in order |
-| `TGA_AGENTS` | all | Which agents `/agent` offers: `claude,opencode,kiro,devin` |
+| `TGA_AGENTS` | all | Which agents `/agent` offers: `claude,opencode,kiro,devin,omp,antigravity` |
 | `TGA_AGENT` | `claude` | Agent a new chat starts with |
 | `TGA_<AGENT>_BIN` | — | Executable override, e.g. `TGA_CLAUDE_BIN=/home/me/.local/bin/claude` |
 | `TGA_<AGENT>_MODEL` | claude: `sonnet`, others: empty | Default model per agent; empty = CLI default |

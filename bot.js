@@ -6,7 +6,8 @@
  *
  *   message  ->  <agent CLI in headless mode>  ->  text + progress back to Telegram
  *
- * Backends live in backends/ (Claude Code, OpenCode, Kiro CLI, Devin CLI).
+ * Backends live in backends/ (Claude Code, OpenCode, Kiro CLI, Devin CLI, OMP,
+ * Antigravity).
  * /agent switches between them per chat; every agent keeps its own session,
  * model and effort, so switching back resumes where you left off.
  *

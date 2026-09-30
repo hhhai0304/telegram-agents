@@ -5,7 +5,7 @@
  * Every backend module exports the same small interface (see claude.js for the
  * reference implementation and comments):
  *
- *   id            'claude' | 'opencode' | 'kiro' | 'devin'
+ *   id            'claude' | 'opencode' | 'kiro' | 'devin' | 'omp' | 'antigravity'
  *                 — used in /agent and state
  *   name          human label
  *   bin           executable name; overridable with TGA_<ID>_BIN
@@ -38,6 +38,8 @@ const ALL = [
   require('./opencode.js'),
   require('./kiro.js'),
   require('./devin.js'),
+  require('./omp.js'),
+  require('./antigravity.js'),
 ];
 
 const byId = Object.fromEntries(ALL.map((b) => [b.id, b]));
