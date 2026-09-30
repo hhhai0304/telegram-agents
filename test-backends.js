@@ -318,7 +318,8 @@ test('antigravity: parser folds init/step_update/result', () => {
   const p = agy.createParser((e) => evs.push(e));
   p.feed([
     { event: 'init', conversation_id: 'conv-9', init: { cwd: '/tmp' } },
-    { event: 'step_update', step_update: { step_index: 1, state: 'ACTIVE', step_type: 'tool', tool: 'run_command', args: { command: 'ls' } } },
+    { event: 'step_update', step_update: { step_index: 1, state: 'ACTIVE', step_type: 'tool',
+      tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'ls' } } } },
     { event: 'step_update', step_update: { step_index: 2, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'hel' } },
     { event: 'step_update', step_update: { step_index: 2, state: 'DONE', step_type: 'agent_response', text_delta: 'lo' } },
     { event: 'result', result: { status: 'SUCCESS', response: 'hello', usage: { total_tokens: 10 } } },

@@ -67,11 +67,12 @@ module.exports = {
           return;
         case 'step_update': {
           const s = evt.step_update || {};
-          if (s.step_type === 'tool' || s.tool) {
+          if (s.step_type === 'tool' || s.tool_name || s.tool) {
             if (seenTools.has(s.step_index)) return;
             seenTools.add(s.step_index);
-            const name = s.tool || s.tool_name || s.name || 'tool';
-            const input = s.input || s.args || s.arguments || s.parameters || {};
+            const ti = s.tool_info || {};
+            const name = ti.name || s.tool_name || s.tool || 'tool';
+            const input = ti.parameters || s.input || s.args || s.arguments || s.parameters || {};
             emit({ type: 'tool', name: String(name), input });
             return;
           }
