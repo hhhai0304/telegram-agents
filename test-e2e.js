@@ -96,10 +96,9 @@ const api = http.createServer((req, res) => {
       // Kilo has no fake CLI: the test asserts it shows up as NOT installed, so
       // pin its binary to a path that cannot exist. Without this the assertion
       // depends on whether the host happens to have `kilo` on PATH. Claude and
-      // Command Code get the same treatment for the same reason.
+      // Devin get the same treatment for the same reason.
       TGA_KILO_BIN: '/nonexistent/kilo',
       TGA_CLAUDE_BIN: '/nonexistent/claude',
-      TGA_COMMANDCODE_BIN: '/nonexistent/command-code',
       TGA_DEVIN_BIN: '/nonexistent/devin',
       // Between them these three exercise every branch of the price label:
       // `:free` suffix, a prefix declared free, and a model that bills.
@@ -174,10 +173,9 @@ const api = http.createServer((req, res) => {
     const m = sent.find((x) => /Current agent: Kiro CLI/.test(x.text));
     assert.ok(m, 'no agent list');
     assert.ok(/• Kilo CLI ✗ not installed/.test(m.text), m.text);
-    assert.ok(/• Command Code ✗ not installed/.test(m.text), m.text);
     assert.ok(/• OpenCode — model gemini-3\.7-flash · session fake01/.test(m.text), m.text);
     const rows = m.reply_markup.inline_keyboard.map((r) => r[0].text);
-    assert.deepStrictEqual(rows, ['Claude Code ✗', 'OpenCode', 'Kilo CLI ✗', '● Kiro CLI', 'Command Code ✗', 'Devin ✗']);
+    assert.deepStrictEqual(rows, ['Claude Code ✗', 'OpenCode', 'Kilo CLI ✗', '● Kiro CLI', 'Devin ✗']);
   });
   test('switching back to claude keeps its own (empty) session', () => {
     const t = texts.filter((x) => /^🧠 Claude Code\n/.test(x)).pop();
