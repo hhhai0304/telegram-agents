@@ -85,7 +85,7 @@ const api = http.createServer((req, res) => {
       // bot.js also reads the real config.env next to it, so anything this test
       // does not pin leaks in from the live install. Access control has to be
       // pinned explicitly or a TGA_ALLOWED_USER_IDS there blocks the whole
-      // scripted conversation. (Same trap as TGA_KILO_BIN below.)
+      // scripted conversation. (Same trap as the TGA_*_BIN pins below.)
       TGA_ALLOWED_USER_IDS: '',
       TGA_TELEGRAM_API: `http://127.0.0.1:${port}`,
       TGA_DATA_DIR: dataDir,
@@ -93,11 +93,8 @@ const api = http.createServer((req, res) => {
       TGA_DEFAULT_CWD: dataDir,
       TGA_LANG: 'en',
       TGA_AGENTS: '', TGA_AGENT: 'claude',
-      // Kilo has no fake CLI: the test asserts it shows up as NOT installed, so
-      // pin its binary to a path that cannot exist. Without this the assertion
-      // depends on whether the host happens to have `kilo` on PATH. Claude and
-      // Devin get the same treatment for the same reason.
-      TGA_KILO_BIN: '/nonexistent/kilo',
+      // Pin binaries to paths that cannot exist, so the assertions do not
+      // depend on which CLIs this host happens to have installed.
       TGA_CLAUDE_BIN: '/nonexistent/claude',
       TGA_DEVIN_BIN: '/nonexistent/devin',
       // Between them these three exercise every branch of the price label:
@@ -172,10 +169,9 @@ const api = http.createServer((req, res) => {
   test('/agent shows every agent with install marks', () => {
     const m = sent.find((x) => /Current agent: Kiro CLI/.test(x.text));
     assert.ok(m, 'no agent list');
-    assert.ok(/• Kilo CLI ✗ not installed/.test(m.text), m.text);
     assert.ok(/• OpenCode — model gemini-3\.7-flash · session fake01/.test(m.text), m.text);
     const rows = m.reply_markup.inline_keyboard.map((r) => r[0].text);
-    assert.deepStrictEqual(rows, ['Claude Code ✗', 'OpenCode', 'Kilo CLI ✗', '● Kiro CLI', 'Devin ✗']);
+    assert.deepStrictEqual(rows, ['Claude Code ✗', 'OpenCode', '● Kiro CLI', 'Devin ✗']);
   });
   test('switching back to claude keeps its own (empty) session', () => {
     const t = texts.filter((x) => /^🧠 Claude Code\n/.test(x)).pop();

@@ -24,8 +24,8 @@ function collect(b, chunks, ctx) {
 const types = (evs) => evs.map((e) => e.type);
 
 // ---------------------------------------------------------------- registry ---
-test('registry has the five agents', () => {
-  assert.deepStrictEqual(backends.ALL.map((b) => b.id), ['claude', 'opencode', 'kilo', 'kiro', 'devin']);
+test('registry has the four agents', () => {
+  assert.deepStrictEqual(backends.ALL.map((b) => b.id), ['claude', 'opencode', 'kiro', 'devin']);
   for (const b of backends.ALL) {
     for (const k of ['buildArgs', 'listSessions', 'createParser', 'isSessionGone', 'sessionLabel']) {
       assert.strictEqual(typeof b[k], 'function', `${b.id}.${k}`);
@@ -86,8 +86,8 @@ test('claude: stale session detection', () => {
   assert.ok(!claude.isSessionGone('No conversation found', 0));
 });
 
-// -------------------------------------------------------- opencode / kilo ---
-for (const id of ['opencode', 'kilo']) {
+// ------------------------------------------------------------ opencode ---
+for (const id of ['opencode']) {
   const b = backends.byId[id];
   test(`${id}: run --format json --auto, prompt as argument`, () => {
     const { args } = b.buildArgs({ prompt: 'fix the bug', model: '', sessionId: null });
@@ -185,34 +185,12 @@ function guardWithHome(id, install) {
   fs.rmSync(home, { recursive: true, force: true });
   return out.trim();
 }
-test('kilo: guard is false without the approval-gate plugin', () => {
-  assert.strictEqual(guardWithHome('kilo', false), 'false');
-});
-test('kilo: guard turns true once the plugin is installed', () => {
-  assert.strictEqual(guardWithHome('kilo', true), 'true');
-});
-test('opencode: the same plugin lookup applies, per CLI config dir', () => {
+test('opencode: the plugin lookup applies, per CLI config dir', () => {
   assert.strictEqual(guardWithHome('opencode', true), 'true');
   assert.strictEqual(guardWithHome('opencode', false), 'false');
 });
 
-// ------------------------------------------------------- kilo model shortlist ---
-test('kilo: /model offers a shortlist but stays open to any id', () => {
-  const kilo = backends.byId.kilo;
-  assert.strictEqual(kilo.defaultModel, 'openrouter/deepseek/deepseek-v4-flash-0731');
-  assert.ok(kilo.models.includes('openrouter/moonshotai/kimi-k3'));
-  assert.ok(kilo.models.includes('openrouter/deepseek/deepseek-v4-pro-0813'));
-  assert.ok(kilo.models.includes('openrouter/qwen/qwen3.7-plus'));
-  assert.strictEqual(kilo.modelsOpen, true, 'typing another id must still work');
-  // Telegram rejects callback_data over 64 bytes; `m:` + the id must fit.
-  for (const m of kilo.models) assert.ok(Buffer.byteLength(`m:${m}`) <= 64, m);
-});
-test('kilo: the default model reaches the CLI as --model', () => {
-  const kilo = backends.byId.kilo;
-  const { args } = kilo.buildArgs({ prompt: 'x', model: kilo.defaultModel, sessionId: null });
-  assert.strictEqual(args[args.indexOf('--model') + 1], 'openrouter/deepseek/deepseek-v4-flash-0731');
-});
-test('opencode: unchanged, no shortlist of its own', () => {
+test('opencode: no model shortlist — /model stays free text', () => {
   assert.deepStrictEqual(backends.byId.opencode.models, []);
   assert.strictEqual(backends.byId.opencode.defaultModel, '');
 });

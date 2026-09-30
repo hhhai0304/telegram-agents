@@ -2,7 +2,7 @@
 
 One Telegram bot, several coding-agent CLIs. Message your bot and it runs
 [Claude Code](https://claude.com/claude-code), [OpenCode](https://opencode.ai),
-[Kilo CLI](https://kilo.ai), [Kiro CLI](https://kiro.dev) or [Devin](https://devin.ai) on your
+[Kiro CLI](https://kiro.dev) or [Devin](https://devin.ai) on your
 machine, streams progress
 back, and — for Claude Code and Devin — asks for permission with inline buttons before doing
 anything dangerous. `/agent` switches between them; each keeps its own session.
@@ -15,7 +15,6 @@ anything dangerous. `/agent` switches between them; each keeps its own session.
 ```
 you (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude -p --output-format stream-json
                      │         backends/opencode.js  ──▶ opencode run --format json --auto
-                     │         backends/kilo.js      ──▶ kilo run --format json --auto
                      │         backends/kiro.js      ──▶ kiro-cli chat --no-interactive --trust-all-tools
                      │         backends/devin.js     ──▶ devin -p --permission-mode dangerous --export F
                      ▲
@@ -25,11 +24,11 @@ you (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude
 ## What you get
 
 - **The real CLIs**, not a chat wrapper — real tools, real files, real shell, on your box.
-- **`/agent` to switch** between Claude Code, OpenCode, Kilo, Kiro and Devin per chat. Every agent keeps
+- **`/agent` to switch** between Claude Code, OpenCode, Kiro and Devin per chat. Every agent keeps
   its own session, model and effort, so switching back resumes where you left off. Agents that
   aren't installed still show up, marked ✗, and refuse to run.
 - **Sessions that persist.** `/sessions` lists recent ones for the current agent, tap to continue.
-  Claude Code and OpenCode/Kilo resume by id; Kiro resumes the last conversation in the directory.
+  Claude Code, OpenCode and Devin resume by id; Kiro resumes the last conversation in the directory.
 - **A permission layer built for a phone** — for Claude Code. `risk.js` classifies every tool call;
   risky ones turn into an Approve/Deny button in the chat. Approvals fail *closed*.
 - **Live progress.** A status line ticks with elapsed time, tool count, and current tool. A recap
@@ -44,7 +43,6 @@ you (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude
 |---|---|---|---|---|---|
 | Claude Code | `claude` | `claude -p --output-format stream-json` | list + resume by id | ✅ smart / ask / auto | buttons · low→max |
 | OpenCode | `opencode` | `opencode run --format json --auto` | list + resume by id | ✅ with the guard plugin | `/model provider/model` |
-| Kilo CLI | `kilo` | `kilo run --format json --auto` | same as OpenCode | ✅ with the guard plugin | buttons for a shortlist, `/model <any id>` for the rest |
 | Kiro CLI | `kiro` | `kiro-cli chat --no-interactive --trust-all-tools` | one per directory, `--resume` | ✗ always trusts all tools | `/model <name>` |
 | Devin | `devin` | `devin -p --permission-mode dangerous --export F` | list + resume by id (`-r`) | ✅ via `PreToolUse`/`PermissionRequest` hook | buttons for a shortlist, `/model <any id>` for the rest |
 
@@ -57,14 +55,14 @@ It is opt-in: install it per CLI (see [The permission model](#the-permission-mod
 switches from *off the leash* to guarded; without it these agents run `--auto` and the `/agent`
 list says so. Kiro has neither hook nor plugin and is always unleashed. `/effort` is Claude-only.
 
-Session lists come from whatever store the CLI uses: OpenCode writes JSON files, Kilo 7.x keeps
-sessions in SQLite and only exposes them through `kilo session list --format json`; the adapter
-tries the files first and falls back to the CLI.
+Session lists come from whatever store the CLI uses: OpenCode writes JSON files, while some
+forks keep sessions in SQLite and only expose them through `session list --format json`; the
+adapter tries the files first and falls back to the CLI.
 
 Kiro prints plain text rather than events; the bot strips the colours and spinners and delivers
 the answer when the turn ends, counting `Using tool:` lines for the progress ticker.
 
-> The OpenCode, Kilo and Kiro adapters were written against their documented headless flags and
+> The OpenCode and Kiro adapters were written against their documented headless flags and
 > tested against fakes, not against a machine with all four installed. If one of them misbehaves on
 > your box, `journalctl` shows the exact command line and stderr — open an issue with that.
 
@@ -72,7 +70,7 @@ the answer when the turn ends, counting `Using tool:` lines for the progress tic
 
 - Linux or macOS with **Node >= 18** (systemd optional but recommended)
 - At least one agent CLI installed and logged in:
-  `npm i -g @anthropic-ai/claude-code` · `npm i -g opencode-ai` · `npm i -g @kilocode/cli` · Kiro from kiro.dev
+  `npm i -g @anthropic-ai/claude-code` · `npm i -g opencode-ai` · Kiro from kiro.dev
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
 
 ## Install
@@ -216,15 +214,15 @@ Claude Code runs under a `PreToolUse` hook (`approve-hook.js`). Every tool call 
 `risk.js` also reads the *contents* of scripts before letting the agent execute them, so
 `node deploy.mjs` is judged by what's inside `deploy.mjs`, not by the fact that it says "node".
 
-### Gating OpenCode and Kilo
+### Gating OpenCode
 
 The plugin is not installed automatically — symlink it into the CLI's own config directory and
 restart the bot:
 
 ```bash
-mkdir -p ~/.config/kilo/plugin
+mkdir -p ~/.config/opencode/plugin
 ln -s ~/telegram-agents/plugin/telegram-agents-guard.mjs \
-      ~/.config/kilo/plugin/telegram-agents-guard.js     # ~/.config/opencode/plugin/ for OpenCode
+      ~/.config/opencode/plugin/telegram-agents-guard.js
 sudo systemctl restart telegram-agents
 ```
 
@@ -232,7 +230,7 @@ The backend looks for that file at startup and reports `guard` accordingly, so w
 is what actually runs — a backend never claims to be guarded with nothing enforcing it. The plugin
 reads the same `TGA_*` variables as the Claude hook and fails closed the same way: once the guard
 is on, a missing approval URL, an unreachable bot or a timeout all abort the tool call. With
-`TGA_GUARD=none` it installs no hook at all, so running `kilo` yourself is unaffected.
+`TGA_GUARD=none` it installs no hook at all, so running the CLI yourself is unaffected.
 
 The CLI still runs with `--auto`, on purpose: that answers *its own* permission prompts, which it
 would otherwise reject outright in non-interactive mode. The gate is the plugin, not the CLI. Note
@@ -258,7 +256,7 @@ token out of the repo directory, `~/.config/telegram_secrets` is read as a secon
 | `TGA_ALLOWED_CHAT_IDS` | — | Comma-separated chat ids allowed to drive the bot |
 | `TGA_ALLOWED_USER_IDS` | empty | Comma-separated user ids allowed to drive it; empty = anyone in those chats |
 | `TGA_MAX_CONCURRENT` | `2` | Agents that may run at once; one topic still runs in order |
-| `TGA_AGENTS` | all | Which agents `/agent` offers: `claude,opencode,kilo,kiro` |
+| `TGA_AGENTS` | all | Which agents `/agent` offers: `claude,opencode,kiro,devin` |
 | `TGA_AGENT` | `claude` | Agent a new chat starts with |
 | `TGA_<AGENT>_BIN` | — | Executable override, e.g. `TGA_CLAUDE_BIN=/home/me/.local/bin/claude` |
 | `TGA_<AGENT>_MODEL` | claude: `sonnet`, others: empty | Default model per agent; empty = CLI default |

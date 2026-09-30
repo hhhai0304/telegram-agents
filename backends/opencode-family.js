@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Shared implementation for OpenCode and its forks (Kilo CLI).
+ * Shared implementation for OpenCode and CLI forks of the same lineage.
  *
  *   <bin> run --format json --auto [--session ID] [--model provider/model] "<prompt>"
  *
@@ -24,10 +24,9 @@
  * in and restart the bot to switch a backend from unleashed to guarded.
  *
  * Sessions are tracked from the events (`sessionID`) and resumed with
- * `--session`. listSessions() is best-effort and tries two stores, because the
- * forks disagree: OpenCode writes one JSON file per session under
- * storage/session/, while Kilo CLI 7.x keeps them in SQLite (kilo.db) and only
- * exposes them through `<bin> session list --format json`. Files first (no
+ * `--session`. listSessions() is best-effort and tries two stores: CLIs that
+ * write one JSON file per session under storage/session/, and CLIs that only
+ * expose sessions through `<bin> session list --format json`. Files first (no
  * subprocess), then the CLI, then give up quietly.
  */
 
@@ -56,8 +55,8 @@ function normalizeTool(name, input) {
 /** The bot's own directory: the plugin loads risk.js from here. */
 const APP_DIR = path.join(__dirname, '..');
 
-/** Is the approval-gate plugin installed for this CLI? Both spellings of the
- *  plugin directory are loaded by kilo 7.4.22, so accept either. */
+/** Is the approval-gate plugin installed for this CLI? Accept both spellings
+ *  of the plugin directory — different forks load different ones. */
 function hasGuardPlugin(id) {
   const base = path.join(os.homedir(), '.config', id);
   return ['plugin', 'plugins'].some((d) =>
@@ -97,10 +96,10 @@ function sessionsFromFiles(storageDir, cwd, limit) {
   return rows.slice(0, limit);
 }
 
-/** Kilo-style store: sessions live in SQLite, readable only via the CLI.
- *  Costs one subprocess (~1-2s on a Pi), so it runs only when the file scan
- *  came up empty, i.e. on /sessions. `-a` is deliberately not passed: it
- *  crashes on kilo 7.4.22, and we want this directory anyway. */
+/** CLI-only store fallback: some forks keep sessions in SQLite, readable only
+ *  via the CLI. Costs one subprocess (~1-2s on a Pi), so it runs only when the
+ *  file scan came up empty, i.e. on /sessions. `-a` is deliberately not passed:
+ *  it crashed a past fork version, and we want this directory anyway. */
 function sessionsFromCli(bin, cwd, limit) {
   let out;
   try {

@@ -2,7 +2,7 @@
 
 Một bot Telegram, nhiều CLI coding agent. Nhắn cho bot, nó chạy
 [Claude Code](https://claude.com/claude-code), [OpenCode](https://opencode.ai),
-[Kilo CLI](https://kilo.ai), [Kiro CLI](https://kiro.dev) hoặc [Devin](https://devin.ai) trên máy bạn,
+[Kiro CLI](https://kiro.dev) hoặc [Devin](https://devin.ai) trên máy bạn,
 bắn tiến độ về, và —
 với Claude Code và Devin — hỏi duyệt bằng nút bấm trước khi làm việc nguy hiểm. `/agent` để chuyển qua lại;
 mỗi agent giữ phiên riêng.
@@ -15,7 +15,6 @@ mỗi agent giữ phiên riêng.
 ```
 bạn (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude -p --output-format stream-json
                      │         backends/opencode.js  ──▶ opencode run --format json --auto
-                     │         backends/kilo.js      ──▶ kilo run --format json --auto
                      │         backends/kiro.js      ──▶ kiro-cli chat --no-interactive --trust-all-tools
                      │         backends/devin.js     ──▶ devin -p --permission-mode dangerous --export F
                      ▲
@@ -25,11 +24,11 @@ bạn (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ clau
 ## Được gì
 
 - **CLI thật**, không phải vỏ chat — tool thật, file thật, shell thật, trên máy bạn.
-- **`/agent` để chuyển** giữa Claude Code, OpenCode, Kilo, Kiro, Devin theo từng chat. Mỗi agent giữ
+- **`/agent` để chuyển** giữa Claude Code, OpenCode, Kiro, Devin theo từng chat. Mỗi agent giữ
   phiên, model, effort riêng, chuyển lại là chạy tiếp chỗ cũ. Agent chưa cài vẫn hiện, đánh dấu ✗,
   và từ chối chạy.
 - **Phiên nối tiếp.** `/sessions` liệt kê phiên gần đây của agent hiện tại, bấm để chạy tiếp.
-  Claude Code và OpenCode/Kilo resume theo id; Kiro resume cuộc trò chuyện gần nhất trong thư mục.
+  Claude Code, OpenCode và Devin resume theo id; Kiro resume cuộc trò chuyện gần nhất trong thư mục.
 - **Lớp duyệt quyền làm cho điện thoại** — với Claude Code. `risk.js` phân loại từng tool call; việc
   nguy hiểm biến thành nút Cho phép / Từ chối ngay trong chat. Không bấm = **từ chối**.
 - **Tiến độ trực tiếp.** Dòng trạng thái đếm giây, đếm tool, hiện tool đang chạy. Cuối mỗi lượt có
@@ -44,7 +43,6 @@ bạn (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ clau
 |---|---|---|---|---|---|
 | Claude Code | `claude` | `claude -p --output-format stream-json` | liệt kê + resume theo id | ✅ smart / ask / auto | nút bấm · low→max |
 | OpenCode | `opencode` | `opencode run --format json --auto` | liệt kê + resume theo id | ✅ nếu cài plugin cổng duyệt | `/model provider/model` |
-| Kilo CLI | `kilo` | `kilo run --format json --auto` | như OpenCode | ✅ nếu cài plugin cổng duyệt | nút chọn sẵn vài model, `/model <id bất kỳ>` cho phần còn lại |
 | Kiro CLI | `kiro` | `kiro-cli chat --no-interactive --trust-all-tools` | mỗi thư mục một cuộc, `--resume` | ✗ luôn trust hết tool | `/model <tên>` |
 | Devin | `devin` | `devin -p --permission-mode dangerous --export F` | liệt kê + resume theo id (`-r`) | ✅ qua hook `PreToolUse`/`PermissionRequest` | nút chọn sẵn vài model, `/model <id bất kỳ>` cho phần còn lại |
 
@@ -57,13 +55,13 @@ bật: cài plugin cho từng CLI (xem [Mô hình quyền](#mô-hình-quyền)) 
 sang có xích; không cài thì chúng chạy `--auto` và danh sách `/agent` ghi rõ. Kiro không có cả hook
 lẫn plugin nên luôn thả xích. `/effort` chỉ Claude Code mới có.
 
-Danh sách phiên lấy theo kho của từng CLI: OpenCode ghi ra file JSON, còn Kilo 7.x cất phiên trong
-SQLite và chỉ lộ ra qua `kilo session list --format json`; adapter thử file trước, hụt thì gọi CLI.
+Danh sách phiên lấy theo kho của từng CLI: OpenCode ghi ra file JSON, còn vài fork cất phiên trong
+SQLite và chỉ lộ ra qua `session list --format json`; adapter thử file trước, hụt thì gọi CLI.
 
 Kiro in chữ thường chứ không có event; bot lột màu và spinner, gửi câu trả lời khi lượt kết thúc,
 đếm dòng `Using tool:` để dòng tiến độ vẫn nhúc nhích.
 
-> Adapter OpenCode, Kilo, Kiro viết theo cờ headless trong tài liệu của họ và test bằng CLI giả,
+> Adapter OpenCode và Kiro viết theo cờ headless trong tài liệu của họ và test bằng CLI giả,
 > chưa chạy trên máy có đủ cả bốn. Nếu cái nào trục trặc trên máy bạn, `journalctl` có nguyên dòng
 > lệnh và stderr — mở issue kèm cái đó.
 
@@ -71,7 +69,7 @@ Kiro in chữ thường chứ không có event; bot lột màu và spinner, gử
 
 - Linux hoặc macOS, **Node >= 18** (có systemd thì tiện hơn)
 - Ít nhất một CLI agent đã cài và đăng nhập:
-  `npm i -g @anthropic-ai/claude-code` · `npm i -g opencode-ai` · `npm i -g @kilocode/cli` · Kiro từ kiro.dev
+  `npm i -g @anthropic-ai/claude-code` · `npm i -g opencode-ai` · Kiro từ kiro.dev
 - Bot token lấy từ [@BotFather](https://t.me/BotFather)
 
 ## Cài
@@ -213,21 +211,21 @@ quyết định: chạy thẳng, hay hỏi bạn. `TGA_MODE` chọn chính sách
 `risk.js` còn **đọc nội dung script** trước khi cho chạy, nên `node deploy.mjs` bị xét theo những gì
 nằm trong `deploy.mjs`, không phải theo chữ "node".
 
-### Gắn xích cho OpenCode và Kilo
+### Gắn xích cho OpenCode
 
 Plugin không tự cài — symlink nó vào thư mục config của chính CLI đó rồi restart bot:
 
 ```bash
-mkdir -p ~/.config/kilo/plugin
+mkdir -p ~/.config/opencode/plugin
 ln -s ~/telegram-agents/plugin/telegram-agents-guard.mjs \
-      ~/.config/kilo/plugin/telegram-agents-guard.js     # OpenCode thì ~/.config/opencode/plugin/
+      ~/.config/opencode/plugin/telegram-agents-guard.js
 sudo systemctl restart telegram-agents
 ```
 
 Backend kiểm tra file đó lúc khởi động rồi mới báo `guard`, nên cái `/agent` hiện ra đúng bằng cái
 đang chạy — không có chuyện khoe "có xích" mà chẳng ai giữ. Plugin đọc đúng bộ biến `TGA_*` như hook
 của Claude và cũng **fail closed** y hệt: đã bật xích thì thiếu URL duyệt, bot chết, hay hết giờ chờ
-đều thành huỷ tool call. Với `TGA_GUARD=none` nó không gắn hook nào cả, nên bạn tự gõ `kilo` ở
+đều thành huỷ tool call. Với `TGA_GUARD=none` nó không gắn hook nào cả, nên bạn tự chạy CLI ở
 terminal vẫn như thường.
 
 CLI vẫn chạy kèm `--auto`, cố ý: cái đó trả lời **câu hỏi quyền của chính nó**, không có thì ở chế độ
@@ -253,7 +251,7 @@ thích đầy đủ). Không muốn để token trong thư mục repo thì đặ
 | `TGA_ALLOWED_CHAT_IDS` | — | Chat id được ra lệnh, cách nhau bằng dấu phẩy |
 | `TGA_ALLOWED_USER_IDS` | rỗng | Danh sách user id được phép; rỗng = ai trong các chat đó cũng được |
 | `TGA_MAX_CONCURRENT` | `2` | Số agent chạy cùng lúc; trong một chủ đề vẫn tuần tự |
-| `TGA_AGENTS` | tất cả | Agent nào hiện trong `/agent`: `claude,opencode,kilo,kiro` |
+| `TGA_AGENTS` | tất cả | Agent nào hiện trong `/agent`: `claude,opencode,kiro,devin` |
 | `TGA_AGENT` | `claude` | Agent mặc định cho chat mới |
 | `TGA_<AGENT>_BIN` | — | Đường dẫn file chạy, ví dụ `TGA_CLAUDE_BIN=/home/me/.local/bin/claude` |
 | `TGA_<AGENT>_MODEL` | claude: `sonnet`, còn lại: trống | Model mặc định từng agent; trống = để CLI tự chọn |

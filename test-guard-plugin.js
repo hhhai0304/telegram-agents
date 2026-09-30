@@ -68,10 +68,10 @@ const openServers = [];
 const track = (s) => { openServers.push(s); return s; };
 
 (async () => {
-  await test('the factory survives being called with no context (kilo does)', async () => {
-    // Regression: kilo 7.4.22 calls the factory once with no argument. When the
-    // parameter was destructured this threw, and kilo dropped the plugin
-    // without a word in the log -- the CLI then ran completely unguarded.
+  await test('the factory survives being called with no context', async () => {
+    // Regression: some CLIs of the opencode family call the factory once with
+    // no argument. When the parameter was destructured this threw, and the CLI
+    // dropped the plugin without a word in the log -- it ran fully unguarded.
     const saved = process.env.TGA_GUARD;
     process.env.TGA_GUARD = 'smart';
     try {

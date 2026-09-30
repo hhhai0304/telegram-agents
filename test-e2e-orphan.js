@@ -108,7 +108,6 @@ function test(name, fn) {
       TGA_DEFAULT_CWD: dataDir,
       TGA_LANG: 'en',
       TGA_AGENTS: 'opencode', TGA_AGENT: 'opencode',
-      TGA_KILO_BIN: '/nonexistent/kilo',
       FAKE_ORPHAN: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
