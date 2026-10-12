@@ -25,7 +25,7 @@ const types = (evs) => evs.map((e) => e.type);
 
 // ---------------------------------------------------------------- registry ---
 test('registry has the six agents', () => {
-  assert.deepStrictEqual(backends.ALL.map((b) => b.id), ['claude', 'opencode', 'kiro', 'devin', 'omp', 'antigravity']);
+  assert.deepStrictEqual(backends.ALL.map((b) => b.id), ['claude', 'opencode', 'kiro', 'devin', 'pi', 'antigravity']);
   for (const b of backends.ALL) {
     for (const k of ['buildArgs', 'listSessions', 'createParser', 'isSessionGone', 'sessionLabel']) {
       assert.strictEqual(typeof b[k], 'function', `${b.id}.${k}`);
@@ -262,22 +262,22 @@ test('devin: guard mirrors whether the hook is in the devin config', () => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-// --------------------------------------------------------------------- omp ---
-const omp = backends.byId.omp;
+// ---------------------------------------------------------------------- pi ---
+const pi = backends.byId.pi;
 
-test('omp: -p --mode json --auto-approve, prompt after --', () => {
-  const { args } = omp.buildArgs({ prompt: 'fix it', model: '', effort: '', sessionId: null });
-  assert.deepStrictEqual(args, ['-p', '--mode', 'json', '--auto-approve', '--', 'fix it']);
-  assert.strictEqual(omp.stdinPrompt, false);
+test('pi: -p --mode json, prompt after --, no approval flag needed', () => {
+  const { args } = pi.buildArgs({ prompt: 'fix it', model: '', effort: '', sessionId: null });
+  assert.deepStrictEqual(args, ['-p', '--mode', 'json', '--', 'fix it']);
+  assert.strictEqual(pi.stdinPrompt, false);
 });
-test('omp: model + thinking + resume flags', () => {
-  const { args } = omp.buildArgs({ prompt: 'x', model: 'adaptive', effort: 'high', sessionId: 'abc' });
-  assert.deepStrictEqual(args, ['-p', '--mode', 'json', '--auto-approve',
-    '--model', 'adaptive', '--thinking', 'high', '-r', 'abc', '--', 'x']);
+test('pi: model + thinking + resume flags', () => {
+  const { args } = pi.buildArgs({ prompt: 'x', model: 'adaptive', effort: 'high', sessionId: 'abc' });
+  assert.deepStrictEqual(args, ['-p', '--mode', 'json',
+    '--model', 'adaptive', '--thinking', 'high', '--session', 'abc', '--', 'x']);
 });
-test('omp: parser reads the verified NDJSON event shapes', () => {
+test('pi: parser reads the verified NDJSON event shapes', () => {
   const evs = [];
-  const p = omp.createParser((e) => evs.push(e));
+  const p = pi.createParser((e) => evs.push(e));
   p.feed([
     { type: 'session', id: 'abc123', cwd: '/tmp' },
     { type: 'message_update', assistantMessageEvent: { type: 'toolcall_end', contentIndex: 0,
@@ -292,9 +292,9 @@ test('omp: parser reads the verified NDJSON event shapes', () => {
   assert.strictEqual(evs[2].text, 'done');
   assert.strictEqual(evs[3].costUsd, 0.5);
 });
-test('omp: stale session detection', () => {
-  assert.ok(omp.isSessionGone('Error: session abc not found', 1));
-  assert.ok(!omp.isSessionGone('session not found', 0));
+test('pi: stale session detection', () => {
+  assert.ok(pi.isSessionGone('Error: session abc not found', 1));
+  assert.ok(!pi.isSessionGone('session not found', 0));
 });
 
 // ------------------------------------------------------------- antigravity ---
@@ -325,10 +325,12 @@ test('antigravity: parser folds init/step_update/result', () => {
     { event: 'result', result: { status: 'SUCCESS', response: 'hello', usage: { total_tokens: 10 } } },
   ].map(JSON.stringify).join('\n') + '\n');
   p.end();
-  assert.deepStrictEqual(types(evs), ['session', 'tool', 'text', 'text', 'result']);
+  // Deltas of one step accumulate into a single text event — the bot would
+  // otherwise render every chunk as its own paragraph.
+  assert.deepStrictEqual(types(evs), ['session', 'tool', 'text', 'result']);
   assert.strictEqual(evs[1].name, 'run_command');
-  assert.strictEqual(evs[2].text + evs[3].text, 'hello');
-  assert.strictEqual(evs[4].isError, false);
+  assert.strictEqual(evs[2].text, 'hello');
+  assert.strictEqual(evs[3].isError, false);
 });
 test('antigravity: result error + plain-text fallback line', () => {
   const evs = [];

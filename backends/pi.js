@@ -1,10 +1,10 @@
 'use strict';
 /*
- * Backend: OMP CLI (`omp`, oh-my-pi / pi-coding-agent lineage).
+ * Backend: Pi CLI (`pi`, pi-coding-agent — the renamed OMP lineage).
  *
- *   omp -p --mode json --auto-approve [--model M] [--thinking L] [-r SID] -- "<prompt>"
+ *   pi -p --mode json [--model M] [--thinking L] [--session SID] -- "<prompt>"
  *
- * `--mode json` prints one NDJSON event per line. Verified shapes (v18.4.1):
+ * `--mode json` prints one NDJSON event per line. Verified shapes (v1.1.0):
  *   { type: 'session',  id, cwd }
  *   { type: 'message_update', assistantMessageEvent: { type: 'text_end',
  *        contentIndex, content } }
@@ -16,15 +16,16 @@
  * (`text_delta`/`thinking_*`/`tool_execution_*`/`turn_*` events are ignored —
  * `text_end` carries the complete block, `message_end` the settled usage.)
  *
- * `--auto-approve` is required: without it `-p` keeps asking on stdout where
- * nobody can answer. OMP has a `--hook` extension mechanism that could later
- * host the approval gate; until one is written the backend honestly reports
- * guard: false.
+ * No approval flag is needed: `-p` runs tools straight through (verified live —
+ * bash executed with no prompt). Pi has no approval hook the bot's gate could
+ * ride on anyway, so the backend honestly reports guard: false.
  *
- * Sessions: `--session`/`init` id is a UUID; `-r <id>` resumes by id prefix.
- * Transcripts live at ~/.omp/agent/sessions/<encoded-cwd>/<ts>_<id>.jsonl —
- * the dir name encoding is not public, so listSessions() scans recent .jsonl
- * files and matches the `cwd` field inside each, instead of trusting names.
+ * Sessions: the `session` event id is a UUID; `--session <id>` resumes by id
+ * prefix (verified live). Transcripts live at
+ * ~/.pi/agent/sessions/<encoded-cwd>/<ts>_<id>.jsonl (dir overridable via
+ * PI_CODING_AGENT_SESSION_DIR / PI_CODING_AGENT_DIR) — the dir name encoding is
+ * not public, so listSessions() scans recent .jsonl files and matches the
+ * `cwd` field inside each, instead of trusting names.
  */
 
 const fs = require('fs');
@@ -32,17 +33,18 @@ const os = require('os');
 const path = require('path');
 const { normalizeTool } = require('./opencode-family.js');
 
-const DATA_DIR = process.env.TGA_OMP_DATA_DIR || path.join(os.homedir(), '.omp', 'agent');
-const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
+const DATA_DIR = process.env.TGA_PI_DATA_DIR || process.env.PI_CODING_AGENT_DIR ||
+  path.join(os.homedir(), '.pi', 'agent');
+const SESSIONS_DIR = process.env.PI_CODING_AGENT_SESSION_DIR || path.join(DATA_DIR, 'sessions');
 
-/* /model buttons: 'adaptive' lets OMP's provider pick; `omp models` shows the
- * rest and /model <any id> still works (fuzzy match). */
+/* /model buttons: 'adaptive' lets pi's provider pick; `pi --list-models` shows
+ * the rest and /model <any id> still works (fuzzy match). */
 const MODELS = ['adaptive'];
 
 module.exports = {
-  id: 'omp',
-  name: 'OMP',
-  bin: 'omp',
+  id: 'pi',
+  name: 'Pi',
+  bin: 'pi',
   models: MODELS,
   defaultModel: '',
   modelsOpen: true,
@@ -52,10 +54,10 @@ module.exports = {
   stdinPrompt: false,
 
   buildArgs(ctx) {
-    const args = ['-p', '--mode', 'json', '--auto-approve'];
+    const args = ['-p', '--mode', 'json'];
     if (ctx.model) args.push('--model', ctx.model);
     if (ctx.effort) args.push('--thinking', ctx.effort);
-    if (ctx.sessionId) args.push('-r', ctx.sessionId);
+    if (ctx.sessionId) args.push('--session', ctx.sessionId);
     args.push('--', ctx.prompt);
     return { args, env: { NO_COLOR: '1', TERM: 'dumb' } };
   },

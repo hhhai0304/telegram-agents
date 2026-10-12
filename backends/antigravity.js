@@ -60,6 +60,19 @@ module.exports = {
     const seenTools = new Set();
     const stepText = new Map();   // step_index -> accumulated delta text
 
+    /* The bot joins text events with blank lines, so one event per delta would
+     * render every chunk as its own paragraph — mid-word breaks included.
+     * Deltas are held per step and emitted as a single block once the step is
+     * done: when a later step_update arrives, and finally at result/end(). */
+    const flushSteps = (below = Infinity) => {
+      const ready = [...stepText.keys()].filter((i) => i < below).sort((a, b) => a - b);
+      for (const i of ready) {
+        const t = stepText.get(i);
+        stepText.delete(i);
+        if (t.trim()) emit({ type: 'text', text: t.trim() });
+      }
+    };
+
     const handle = (evt) => {
       switch (evt.event) {
         case 'init':
@@ -67,6 +80,9 @@ module.exports = {
           return;
         case 'step_update': {
           const s = evt.step_update || {};
+          // A later step means every earlier text step is finished — flush
+          // them first so message order matches the agent's.
+          if (typeof s.step_index === 'number') flushSteps(s.step_index);
           if (s.step_type === 'tool' || s.tool_name || s.tool) {
             if (seenTools.has(s.step_index)) return;
             seenTools.add(s.step_index);
@@ -81,7 +97,6 @@ module.exports = {
           const delta = s.text_delta || s.delta;
           if (typeof delta === 'string' && delta) {
             stepText.set(s.step_index, (stepText.get(s.step_index) || '') + delta);
-            emit({ type: 'text', text: delta });
             gotText = true;
             return;
           }
@@ -92,6 +107,7 @@ module.exports = {
           return;
         }
         case 'result': {
+          flushSteps();
           const r = evt.result || {};
           const status = String(r.status || '').toUpperCase();
           if (r.error) sawError = typeof r.error === 'string' ? r.error : JSON.stringify(r.error);
@@ -135,6 +151,7 @@ module.exports = {
       end() {
         const line = buf.trim(); buf = '';
         if (line) onLine(line);
+        flushSteps();
         emit({ type: 'result', costUsd: 0, isError: !!sawError, text: sawError || '', denials: [] });
       },
     };
