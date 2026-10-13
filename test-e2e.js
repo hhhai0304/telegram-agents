@@ -96,7 +96,6 @@ const api = http.createServer((req, res) => {
       // Pin binaries to paths that cannot exist, so the assertions do not
       // depend on which CLIs this host happens to have installed.
       TGA_CLAUDE_BIN: '/nonexistent/claude',
-      TGA_DEVIN_BIN: '/nonexistent/devin',
       TGA_PI_BIN: '/nonexistent/pi',
       TGA_ANTIGRAVITY_BIN: '/nonexistent/agy',
       // Between them these three exercise every branch of the price label:
@@ -173,7 +172,7 @@ const api = http.createServer((req, res) => {
     assert.ok(m, 'no agent list');
     assert.ok(/• OpenCode — model gemini-3\.7-flash · session fake01/.test(m.text), m.text);
     const rows = m.reply_markup.inline_keyboard.map((r) => r[0].text);
-    assert.deepStrictEqual(rows, ['Claude Code ✗', 'OpenCode', '● Kiro CLI', 'Devin ✗', 'Pi ✗', 'Antigravity ✗']);
+    assert.deepStrictEqual(rows, ['Claude Code ✗', 'OpenCode', '● Kiro CLI', 'Pi ✗', 'Antigravity ✗']);
   });
   test('switching back to claude keeps its own (empty) session', () => {
     const t = texts.filter((x) => /^🧠 Claude Code\n/.test(x)).pop();

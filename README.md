@@ -2,10 +2,10 @@
 
 One Telegram bot, several coding-agent CLIs. Message your bot and it runs
 [Claude Code](https://claude.com/claude-code), [OpenCode](https://opencode.ai),
-[Kiro CLI](https://kiro.dev), [Devin](https://devin.ai), [Pi](https://pi.dev) or
+[Kiro CLI](https://kiro.dev), [Pi](https://pi.dev) or
 [Antigravity](https://antigravity.google) on your
 machine, streams progress
-back, and — for Claude Code and Devin — asks for permission with inline buttons before doing
+back, and — for Claude Code — asks for permission with inline buttons before doing
 anything dangerous. `/agent` switches between them; each keeps its own session.
 
 **Zero npm dependencies.** Node builtins only. Successor of
@@ -17,28 +17,27 @@ anything dangerous. `/agent` switches between them; each keeps its own session.
 you (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude -p --output-format stream-json
                      │         backends/opencode.js  ──▶ opencode run --format json --auto
                      │         backends/kiro.js      ──▶ kiro-cli chat --no-interactive --trust-all-tools
-                     │         backends/devin.js     ──▶ devin -p --permission-mode dangerous --export F
                      │         backends/pi.js        ──▶ pi -p --mode json
                      │         backends/antigravity.js ──▶ agy --print P --output-format stream-json
                      ▲
-                  buttons ◀── approve-hook.js ──▶ risk.js      (Claude Code and Devin)
+                  buttons ◀── approve-hook.js ──▶ risk.js      (Claude Code)
 ```
 
 ## What you get
 
 - **The real CLIs**, not a chat wrapper — real tools, real files, real shell, on your box.
-- **`/agent` to switch** between Claude Code, OpenCode, Kiro, Devin, Pi and Antigravity per chat. Every agent keeps
+- **`/agent` to switch** between Claude Code, OpenCode, Kiro, Pi and Antigravity per chat. Every agent keeps
   its own session, model and effort, so switching back resumes where you left off. Agents that
   aren't installed still show up, marked ✗, and refuse to run.
 - **Sessions that persist.** `/sessions` lists recent ones for the current agent, tap to continue.
-  Claude Code, OpenCode, Devin, Pi and Antigravity resume by id; Kiro resumes the last
+  Claude Code, OpenCode, Pi and Antigravity resume by id; Kiro resumes the last
   conversation in the directory.
 - **A permission layer built for a phone** — for Claude Code. `risk.js` classifies every tool call;
   risky ones turn into an Approve/Deny button in the chat. Approvals fail *closed*.
 - **Live progress.** A status line ticks with elapsed time, tool count, and current tool. A recap
   of what was touched (files written, commands run) closes every turn, on every agent.
 - **Only your chat ids** may talk to it. Everyone else is dropped.
-- **Tests:** 71 on the risk classifier, 23 on the backend adapters, and an end-to-end run against a
+- **Tests:** 71 on the risk classifier, 28 on the backend adapters, and an end-to-end run against a
   fake Telegram API with fake CLIs. `npm test`.
 
 ## Agents
@@ -48,13 +47,10 @@ you (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude
 | Claude Code | `claude` | `claude -p --output-format stream-json` | list + resume by id | ✅ smart / ask / auto | buttons · low→max |
 | OpenCode | `opencode` | `opencode run --format json --auto` | list + resume by id | ✅ with the guard plugin | `/model provider/model` |
 | Kiro CLI | `kiro` | `kiro-cli chat --no-interactive --trust-all-tools` | one per directory, `--resume` | ✗ always trusts all tools | `/model <name>` |
-| Devin | `devin` | `devin -p --permission-mode dangerous --export F` | list + resume by id (`-r`) | ✅ via `PreToolUse`/`PermissionRequest` hook | buttons for a shortlist, `/model <any id>` for the rest |
 | Pi | `pi` | `pi -p --mode json` | list + resume by id (`--session`) | ✗ `-p` runs tools unprompted | `adaptive` button + `/model <any id>`; `/effort` maps to `--thinking` |
 | Antigravity | `antigravity` | `agy --print P --output-format stream-json` | resume by `--conversation <id>` | ✗ `--dangerously-skip-permissions` required headless | `/model` + `/effort low|medium|high` |
 
-Claude Code is gated through its `PreToolUse` hook; Devin through the same event plus
-`PermissionRequest` (`approve-hook-devin.js` in `~/.config/devin/config.json`, inert for
-interactive runs). The OpenCode family has no such hook, but it
+Claude Code is gated through its `PreToolUse` hook. The OpenCode family has no such hook, but it
 does have plugins, and a plugin's `tool.execute.before` can refuse a tool call — that is what
 `plugin/telegram-agents-guard.mjs` does, reusing the same `risk.js` and the same Telegram buttons.
 It is opt-in: install it per CLI (see [The permission model](#the-permission-model)) and the agent
@@ -253,7 +249,7 @@ the scope — tool calls are covered, anything the CLI does outside a tool call 
 Setting `TGA_GUARD_MODE=none` in `config.env` runs Claude with `--dangerously-skip-permissions` and
 makes the hook allow everything, in every mode. No buttons, nothing to tap, much faster. It also
 means anyone who gets hold of your bot token gets a shell as your user: your SSH keys, your files,
-your `sudo`. That is a real trade, not a formality — make it deliberately. The other three agents
+your `sudo`. That is a real trade, not a formality — make it deliberately. The other agents
 are always in this state; see [Agents](#agents).
 
 ## Configuration
@@ -268,7 +264,7 @@ token out of the repo directory, `~/.config/telegram_secrets` is read as a secon
 | `TGA_ALLOWED_CHAT_IDS` | — | Comma-separated chat ids allowed to drive the bot |
 | `TGA_ALLOWED_USER_IDS` | empty | Comma-separated user ids allowed to drive it; empty = anyone in those chats |
 | `TGA_MAX_CONCURRENT` | `2` | Agents that may run at once; one topic still runs in order |
-| `TGA_AGENTS` | all | Which agents `/agent` offers: `claude,opencode,kiro,devin,pi,antigravity` |
+| `TGA_AGENTS` | all | Which agents `/agent` offers: `claude,opencode,kiro,pi,antigravity` |
 | `TGA_AGENT` | `claude` | Agent a new chat starts with |
 | `TGA_<AGENT>_BIN` | — | Executable override, e.g. `TGA_CLAUDE_BIN=/home/me/.local/bin/claude` |
 | `TGA_<AGENT>_MODEL` | claude: `sonnet`, others: empty | Default model per agent; empty = CLI default |
@@ -303,7 +299,7 @@ end-to-end test to cover it.
 - **Chat-id allowlisting is the whole gate.** Messages are accepted only from listed chat ids; for
   button presses, both the presser's user id *and* the chat id must be listed. Listing a group chat
   id therefore hands the group a shell — don't, unless that is exactly what you mean.
-- **Three of the four agents have no approval gate at all.** With them enabled, the bot token is a
+- **Four of the five agents have no approval gate at all.** With them enabled, the bot token is a
   shell without even the smart-mode speed bump. `TGA_AGENTS=claude` turns them off entirely.
 - The approval endpoint binds `127.0.0.1` only and is guarded by a random per-boot token.
 - Approvals **fail closed**: the buttons expire after `TGA_APPROVE_TIMEOUT_SEC` and deny.

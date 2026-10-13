@@ -2,10 +2,10 @@
 
 Một bot Telegram, nhiều CLI coding agent. Nhắn cho bot, nó chạy
 [Claude Code](https://claude.com/claude-code), [OpenCode](https://opencode.ai),
-[Kiro CLI](https://kiro.dev), [Devin](https://devin.ai), [Pi](https://pi.dev) hoặc
+[Kiro CLI](https://kiro.dev), [Pi](https://pi.dev) hoặc
 [Antigravity](https://antigravity.google) trên máy bạn,
 bắn tiến độ về, và —
-với Claude Code và Devin — hỏi duyệt bằng nút bấm trước khi làm việc nguy hiểm. `/agent` để chuyển qua lại;
+với Claude Code — hỏi duyệt bằng nút bấm trước khi làm việc nguy hiểm. `/agent` để chuyển qua lại;
 mỗi agent giữ phiên riêng.
 
 **Không phụ thuộc npm package nào.** Chỉ dùng builtin của Node. Là bản kế nhiệm của
@@ -17,28 +17,27 @@ mỗi agent giữ phiên riêng.
 bạn (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ claude -p --output-format stream-json
                      │         backends/opencode.js  ──▶ opencode run --format json --auto
                      │         backends/kiro.js      ──▶ kiro-cli chat --no-interactive --trust-all-tools
-                     │         backends/devin.js     ──▶ devin -p --permission-mode dangerous --export F
                      │         backends/pi.js        ──▶ pi -p --mode json
                      │         backends/antigravity.js ──▶ agy --print P --output-format stream-json
                      ▲
-                  nút bấm ◀── approve-hook.js ──▶ risk.js      (Claude Code và Devin)
+                  nút bấm ◀── approve-hook.js ──▶ risk.js      (Claude Code)
 ```
 
 ## Được gì
 
 - **CLI thật**, không phải vỏ chat — tool thật, file thật, shell thật, trên máy bạn.
-- **`/agent` để chuyển** giữa Claude Code, OpenCode, Kiro, Devin, Pi, Antigravity theo từng chat. Mỗi agent giữ
+- **`/agent` để chuyển** giữa Claude Code, OpenCode, Kiro, Pi, Antigravity theo từng chat. Mỗi agent giữ
   phiên, model, effort riêng, chuyển lại là chạy tiếp chỗ cũ. Agent chưa cài vẫn hiện, đánh dấu ✗,
   và từ chối chạy.
 - **Phiên nối tiếp.** `/sessions` liệt kê phiên gần đây của agent hiện tại, bấm để chạy tiếp.
-  Claude Code, OpenCode, Devin, Pi, Antigravity resume theo id; Kiro resume cuộc trò chuyện gần
+  Claude Code, OpenCode, Pi, Antigravity resume theo id; Kiro resume cuộc trò chuyện gần
   nhất trong thư mục.
 - **Lớp duyệt quyền làm cho điện thoại** — với Claude Code. `risk.js` phân loại từng tool call; việc
   nguy hiểm biến thành nút Cho phép / Từ chối ngay trong chat. Không bấm = **từ chối**.
 - **Tiến độ trực tiếp.** Dòng trạng thái đếm giây, đếm tool, hiện tool đang chạy. Cuối mỗi lượt có
   bản tóm tắt đã đụng vào gì (file ghi, lệnh chạy), agent nào cũng có.
 - **Chỉ chat id của bạn** ra lệnh được. Người lạ bị bỏ qua.
-- **Test:** 71 ca cho bộ phân loại rủi ro, 23 ca cho adapter backend, và một lượt end-to-end với
+- **Test:** 71 ca cho bộ phân loại rủi ro, 28 ca cho adapter backend, và một lượt end-to-end với
   Telegram API giả + CLI giả. `npm test`.
 
 ## Các agent
@@ -48,13 +47,10 @@ bạn (Telegram) ──▶ bot.js ──▶ backends/claude.js    ──▶ clau
 | Claude Code | `claude` | `claude -p --output-format stream-json` | liệt kê + resume theo id | ✅ smart / ask / auto | nút bấm · low→max |
 | OpenCode | `opencode` | `opencode run --format json --auto` | liệt kê + resume theo id | ✅ nếu cài plugin cổng duyệt | `/model provider/model` |
 | Kiro CLI | `kiro` | `kiro-cli chat --no-interactive --trust-all-tools` | mỗi thư mục một cuộc, `--resume` | ✗ luôn trust hết tool | `/model <tên>` |
-| Devin | `devin` | `devin -p --permission-mode dangerous --export F` | liệt kê + resume theo id (`-r`) | ✅ qua hook `PreToolUse`/`PermissionRequest` | nút chọn sẵn vài model, `/model <id bất kỳ>` cho phần còn lại |
 | Pi | `pi` | `pi -p --mode json` | liệt kê + resume theo id (`--session`) | ✗ `-p` chạy tool không hỏi | nút `adaptive` + `/model <id bất kỳ>`; `/effort` map sang `--thinking` |
 | Antigravity | `antigravity` | `agy --print P --output-format stream-json` | resume bằng `--conversation <id>` | ✗ headless bắt buộc `--dangerously-skip-permissions` | `/model` + `/effort low|medium|high` |
 
-Claude Code được xích bằng hook `PreToolUse`; Devin cũng dùng event đó cộng thêm
-`PermissionRequest` (`approve-hook-devin.js` trong `~/.config/devin/config.json`, tự ngủ trong
-các phiên chạy tay). Họ OpenCode không có hook đó, nhưng có plugin, và
+Claude Code được xích bằng hook `PreToolUse`. Họ OpenCode không có hook đó, nhưng có plugin, và
 `tool.execute.before` của plugin có quyền chặn một tool call — đó là việc của
 `plugin/telegram-agents-guard.mjs`, dùng lại đúng `risk.js` và đúng mấy cái nút Telegram. Phải tự
 bật: cài plugin cho từng CLI (xem [Mô hình quyền](#mô-hình-quyền)) thì agent chuyển từ *thả xích*
@@ -262,7 +258,7 @@ thích đầy đủ). Không muốn để token trong thư mục repo thì đặ
 | `TGA_ALLOWED_CHAT_IDS` | — | Chat id được ra lệnh, cách nhau bằng dấu phẩy |
 | `TGA_ALLOWED_USER_IDS` | rỗng | Danh sách user id được phép; rỗng = ai trong các chat đó cũng được |
 | `TGA_MAX_CONCURRENT` | `2` | Số agent chạy cùng lúc; trong một chủ đề vẫn tuần tự |
-| `TGA_AGENTS` | tất cả | Agent nào hiện trong `/agent`: `claude,opencode,kiro,devin,pi,antigravity` |
+| `TGA_AGENTS` | tất cả | Agent nào hiện trong `/agent`: `claude,opencode,kiro,pi,antigravity` |
 | `TGA_AGENT` | `claude` | Agent mặc định cho chat mới |
 | `TGA_<AGENT>_BIN` | — | Đường dẫn file chạy, ví dụ `TGA_CLAUDE_BIN=/home/me/.local/bin/claude` |
 | `TGA_<AGENT>_MODEL` | claude: `sonnet`, còn lại: trống | Model mặc định từng agent; trống = để CLI tự chọn |
@@ -296,7 +292,7 @@ ghép vào được. `bot.js` không bao giờ đụng tới cờ CLI hay địn
 - **Danh sách chat id là cả cái cổng.** Tin nhắn chỉ nhận từ chat id có trong danh sách; với nút bấm
   thì cả user id của người bấm *lẫn* chat id đều phải có. Cho nên đưa id của một group vào đây là
   trao shell cho cả group — đừng, trừ khi bạn cố ý.
-- **Ba trong bốn agent không có cổng duyệt nào cả.** Bật chúng lên là bot token thành shell mà
+- **Bốn trong năm agent không có cổng duyệt nào cả.** Bật chúng lên là bot token thành shell mà
   không có cả cái phanh smart mode. `TGA_AGENTS=claude` để tắt hẳn.
 - Cổng duyệt chỉ bind `127.0.0.1` và có token ngẫu nhiên sinh lại mỗi lần khởi động.
 - Duyệt quyền **fail closed**: nút hết hạn sau `TGA_APPROVE_TIMEOUT_SEC` là tự từ chối.

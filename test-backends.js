@@ -24,8 +24,8 @@ function collect(b, chunks, ctx) {
 const types = (evs) => evs.map((e) => e.type);
 
 // ---------------------------------------------------------------- registry ---
-test('registry has the six agents', () => {
-  assert.deepStrictEqual(backends.ALL.map((b) => b.id), ['claude', 'opencode', 'kiro', 'devin', 'pi', 'antigravity']);
+test('registry has the five agents', () => {
+  assert.deepStrictEqual(backends.ALL.map((b) => b.id), ['claude', 'opencode', 'kiro', 'pi', 'antigravity']);
   for (const b of backends.ALL) {
     for (const k of ['buildArgs', 'listSessions', 'createParser', 'isSessionGone', 'sessionLabel']) {
       assert.strictEqual(typeof b[k], 'function', `${b.id}.${k}`);
@@ -193,73 +193,6 @@ test('opencode: the plugin lookup applies, per CLI config dir', () => {
 test('opencode: no model shortlist — /model stays free text', () => {
   assert.deepStrictEqual(backends.byId.opencode.models, []);
   assert.strictEqual(backends.byId.opencode.defaultModel, '');
-});
-
-// ------------------------------------------------------------------ devin ---
-const devin = backends.byId.devin;
-const devinCtx = { prompt: 'hi', model: '', sessionId: null, guardMode: 'bymode', mode: 'smart', hookEnv: { TGA_GUARD: 'smart' }, chatId: 'testchat' };
-
-test('devin: -p carries the prompt, trust check off, export per chat', () => {
-  const { args } = devin.buildArgs(devinCtx);
-  assert.strictEqual(args[0], '-p');
-  assert.strictEqual(args[1], 'hi');
-  assert.ok(args.includes('--respect-workspace-trust'));
-  const ex = args.indexOf('--export');
-  assert.ok(ex > 0 && args[ex + 1].includes('tga-devin-testchat'));
-  assert.strictEqual(devin.stdinPrompt, false);
-});
-test('devin: smart/ask run dangerous (the hook gates), auto runs permission-mode auto', () => {
-  const smart = devin.buildArgs(devinCtx);
-  assert.deepStrictEqual(smart.args.slice(smart.args.indexOf('--permission-mode'), smart.args.indexOf('--permission-mode') + 2), ['--permission-mode', 'dangerous']);
-  assert.strictEqual(smart.env.TGA_GUARD, 'smart');
-  const auto = devin.buildArgs({ ...devinCtx, mode: 'auto' });
-  assert.deepStrictEqual(auto.args.slice(auto.args.indexOf('--permission-mode'), auto.args.indexOf('--permission-mode') + 2), ['--permission-mode', 'auto']);
-  assert.strictEqual(auto.env.TGA_GUARD, 'auto');
-});
-test('devin: guardMode none bypasses even in auto', () => {
-  const { args, env } = devin.buildArgs({ ...devinCtx, mode: 'auto', guardMode: 'none' });
-  assert.ok(args.includes('dangerous'));
-  assert.strictEqual(env.TGA_GUARD, 'none');
-});
-test('devin: resume + model flags', () => {
-  const { args } = devin.buildArgs({ ...devinCtx, model: 'opus', sessionId: 'blue-soap' });
-  assert.strictEqual(args[args.indexOf('--model') + 1], 'opus');
-  assert.strictEqual(args[args.indexOf('-r') + 1], 'blue-soap');
-});
-test('devin: parser accumulates stdout, emits session from the export file', () => {
-  const exportFile = path.join(os.tmpdir(), 'tga-devin-testchat.json');
-  fs.writeFileSync(exportFile, JSON.stringify({ session_id: 'zigzag-throne' }));
-  const evs = collect(devin, ['part one ', 'part two'], { chatId: 'testchat' });
-  assert.deepStrictEqual(types(evs), ['session', 'text', 'result']);
-  assert.strictEqual(evs[0].id, 'zigzag-throne');
-  assert.strictEqual(evs[1].text, 'part one part two');
-  fs.rmSync(exportFile, { force: true });
-});
-test('devin: a stale export is not mistaken for this run', () => {
-  const exportFile = path.join(os.tmpdir(), 'tga-devin-testchat.json');
-  fs.writeFileSync(exportFile, JSON.stringify({ session_id: 'old-one' }));
-  const old = Date.now() - 3600e3;
-  fs.utimesSync(exportFile, new Date(old), new Date(old));
-  const evs = collect(devin, ['answer'], { chatId: 'testchat' });
-  assert.deepStrictEqual(types(evs), ['text', 'result']);
-  fs.rmSync(exportFile, { force: true });
-});
-test('devin: stale session detection', () => {
-  assert.ok(devin.isSessionGone("Error: No session found matching 'x'", 1));
-  assert.ok(!devin.isSessionGone('No session found', 0));
-});
-test('devin: guard mirrors whether the hook is in the devin config', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tga-guard-'));
-  const cfg = path.join(home, '.config', 'devin');
-  fs.mkdirSync(cfg, { recursive: true });
-  fs.writeFileSync(path.join(cfg, 'config.json'), '{}');
-  const run = () => execFileSync(process.execPath,
-    ['-e', `console.log(require(${JSON.stringify(path.join(__dirname, 'backends', 'devin.js'))}).guard)`],
-    { env: { ...process.env, HOME: home }, encoding: 'utf8' }).trim();
-  assert.strictEqual(run(), 'false');
-  fs.writeFileSync(path.join(cfg, 'config.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: 'node /x/approve-hook-devin.js' }] }] } }));
-  assert.strictEqual(run(), 'true');
-  fs.rmSync(home, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------- pi ---

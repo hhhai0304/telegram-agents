@@ -5,7 +5,7 @@
  * Every backend module exports the same small interface (see claude.js for the
  * reference implementation and comments):
  *
- *   id            'claude' | 'opencode' | 'kiro' | 'devin' | 'pi' | 'antigravity'
+ *   id            'claude' | 'opencode' | 'kiro' | 'pi' | 'antigravity'
  *                 — used in /agent and state
  *   name          human label
  *   bin           executable name; overridable with TGA_<ID>_BIN
@@ -19,7 +19,7 @@
  *   buildArgs(ctx)        -> { args, env }
  *   listSessions(cwd, n)  -> [{ id, title, mtime }]
  *   createParser(emit, ctx) -> { feed(str), end() }  emitting normalized events:
- *                             (ctx is optional: { chatId } — only Devin uses it)
+ *                             (ctx is optional)
  *       { type: 'session', id }
  *       { type: 'text', text }
  *       { type: 'tool', name, input }        name/input in Claude Code vocabulary
@@ -37,7 +37,6 @@ const ALL = [
   require('./claude.js'),
   require('./opencode.js'),
   require('./kiro.js'),
-  require('./devin.js'),
   require('./pi.js'),
   require('./antigravity.js'),
 ];
