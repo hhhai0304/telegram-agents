@@ -1159,13 +1159,18 @@ function sshMonitor(remoteCmd) {
   });
 }
 
+// The PC is Windows 11 again (since 2026-10-19): its display/ambilight logic
+// lives in C:\Tools\*.ps1 and is reached over SSH with PowerShell. Git Bash is
+// NOT usable in an sshd session (HOME arrives mangled as "C:Usershhhai").
+const PC_PS = (script, args = '') => `powershell -NoProfile -ExecutionPolicy Bypass -File C:/Tools/${script}${args}`;
+
 async function monitorToggle(key, on) {
-  const run = await sshMonitor(`bash ~/bin/monitor-${on ? 'on' : 'off'}.sh`);
+  const run = await sshMonitor(PC_PS(on ? 'Monitors-On.ps1' : 'Monitors-Off.ps1'));
   if (!run.ok) { await send(key, S.monitorFailed(run.err || run.out || 'ssh')); return; }
   // kscreen-doctor DPMS settles in ~1-2 s; the settle wait also gives the
   // HyperHDR JSON-RPC LEDDEVICE call inside the script time to land.
   await new Promise((r) => setTimeout(r, 6000));
-  const st = await sshMonitor('bash ~/bin/monitor-state.sh');
+  const st = await sshMonitor(PC_PS('Get-MonitorState.ps1'));
   const state = st.ok && /^(on|off)$/i.test(st.out) ? st.out.toLowerCase() : null;
   await send(key, S.monitorDone(on, state));
 }
@@ -1175,9 +1180,11 @@ async function monitorToggle(key, on) {
 // bootsequence). Both defer the actual reboot by a few seconds so the SSH
 // channel closes cleanly before the machine goes down.
 async function bootSwitch(key, toWindows) {
-  const remoteCmd = toWindows
-    ? 'bash ~/bin/boot-windows.sh'
-    : 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Tools\\Boot-ToLinux.ps1';
+  if (toWindows) {
+    await send(key, '💻 PC dang chay Windows (mac dinh) - khong can doi.');
+    return;
+  }
+  const remoteCmd = PC_PS('Boot-ToLinux.ps1');
   const run = await sshMonitor(remoteCmd);
   const os = toWindows ? 'Windows' : 'Linux';
   await send(key, run.ok
