@@ -70,6 +70,24 @@ function workspaceId() {
 /** POSIX-safe single-quote. */
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
+/**
+ * Where the pane itself starts. run.sh cds into the job's own cwd, so this only
+ * decides what herdr saves for a session restore: a pane saved on a directory
+ * that later vanished comes back as `restore_error`, and every client that reads
+ * pane processes (auto-title) then keeps asking for a pane the server no longer
+ * has. A temp workdir is exactly that kind of directory, so it never becomes the
+ * pane's cwd — the home directory does instead.
+ */
+function paneCwd(cwd) {
+  const real = (p) => { try { return fs.realpathSync(p); } catch (_) { return null; } };
+  const home = os.homedir();
+  const dir = cwd ? real(path.resolve(String(cwd))) : null;
+  if (!dir) return home;
+  const tmp = real(os.tmpdir());
+  if (tmp && (dir === tmp || dir.startsWith(tmp + path.sep))) return home;
+  return dir;
+}
+
 function buildRunScript(h) {
   const cmd = [h.bin, ...h.args].map(shq).join(' ');
   return [
@@ -138,7 +156,7 @@ async function launch({ bin, args, cwd, env: fullEnv, prompt, stdinPrompt, label
   for (const [k, v] of Object.entries(fullEnv || {})) {
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) envArgs.push('--env', `${k}=${v}`);
   }
-  const t = await cliJson(['tab', 'create', '--workspace', ws, '--cwd', cwd,
+  const t = await cliJson(['tab', 'create', '--workspace', ws, '--cwd', paneCwd(cwd),
     '--label', h.label, '--no-focus', ...envArgs]);
   h.tabId = t.result.tab.tab_id;
   h.paneId = t.result.root_pane.pane_id;
@@ -225,4 +243,4 @@ function kill(child, signal) {
   cli(['pane', 'close', h.paneId], 8000).catch(() => {});
 }
 
-module.exports = { enabled, launch, kill };
+module.exports = { enabled, launch, kill, paneCwd };

@@ -140,6 +140,9 @@ function test(name, fn) {
       ...process.env,
       PATH: `${fakebin}:${process.env.PATH}`,
       TG_BOT_TOKEN: 'fake:token',
+      // Never drive the live herdr session: config.env sets TGA_HERDR=1, and a
+      // bridge pane per scripted turn lands in the user's workspace for good.
+      TGA_HERDR: '0',
       TGA_ALLOWED_CHAT_IDS: CHAT,
       // bot.js reads the real config.env too — pin anything that gates input.
       TGA_ALLOWED_USER_IDS: '',
