@@ -37,9 +37,23 @@ const DATA_DIR = process.env.TGA_PI_DATA_DIR || process.env.PI_CODING_AGENT_DIR 
   path.join(os.homedir(), '.pi', 'agent');
 const SESSIONS_DIR = process.env.PI_CODING_AGENT_SESSION_DIR || path.join(DATA_DIR, 'sessions');
 
-/* /model buttons: 'adaptive' lets pi's provider pick; `pi --list-models` shows
- * the rest and /model <any id> still works (fuzzy match). */
-const MODELS = ['adaptive'];
+/* /model buttons: a short pin list of the daily drivers, provider-qualified.
+ * DeepSeek V4.1 Flash is pinned under `opencode-go` only: the DeepSeek platform
+ * serves the same model as `deepseek/deepseek-flash`, and two buttons for one
+ * model — one of which never says "v4.1" — is how you pick the wrong one.
+ * `/model <any id>` still works (fuzzy match, see `pi --list-models`), and the
+ * last button, 'adaptive', is the bot's own "no opinion" marker — not a model id. */
+const MODELS = [
+  'opencode-go/deepseek-v4.1-flash',
+  'deepseek/deepseek-v4-pro',
+  'opencode-go/deepseek-v4-pro',
+  'opencode-go/kimi-k3',
+  'opencode-go/glm-5.3',
+  'opencode-go/gpt-6-luna',
+  'opencode-go/claude-haiku-5-5',
+  'opencode-go/grok-4.7',
+  'adaptive',
+];
 
 module.exports = {
   id: 'pi',
@@ -55,7 +69,11 @@ module.exports = {
 
   buildArgs(ctx) {
     const args = ['-p', '--mode', 'json'];
-    if (ctx.model) args.push('--model', ctx.model);
+    // 'adaptive' is the marker for "let pi decide", never a model id: omitting
+    // --model makes pi use the default provider/model from its settings.json.
+    // Passing it through verbatim used to make every tap fail with
+    // "no models matching adaptive".
+    if (ctx.model && ctx.model !== 'adaptive') args.push('--model', ctx.model);
     if (ctx.effort) args.push('--thinking', ctx.effort);
     if (ctx.sessionId) args.push('--session', ctx.sessionId);
     args.push('--', ctx.prompt);

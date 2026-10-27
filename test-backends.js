@@ -204,9 +204,13 @@ test('pi: -p --mode json, prompt after --, no approval flag needed', () => {
   assert.strictEqual(pi.stdinPrompt, false);
 });
 test('pi: model + thinking + resume flags', () => {
-  const { args } = pi.buildArgs({ prompt: 'x', model: 'adaptive', effort: 'high', sessionId: 'abc' });
+  const { args } = pi.buildArgs({ prompt: 'x', model: 'opencode-go/deepseek-v4.1-flash', effort: 'high', sessionId: 'abc' });
   assert.deepStrictEqual(args, ['-p', '--mode', 'json',
-    '--model', 'adaptive', '--thinking', 'high', '--session', 'abc', '--', 'x']);
+    '--model', 'opencode-go/deepseek-v4.1-flash', '--thinking', 'high', '--session', 'abc', '--', 'x']);
+});
+test("pi: 'adaptive' passes no --model, so pi uses its own default", () => {
+  const { args } = pi.buildArgs({ prompt: 'x', model: 'adaptive', effort: '', sessionId: null });
+  assert.deepStrictEqual(args, ['-p', '--mode', 'json', '--', 'x']);
 });
 test('pi: parser reads the verified NDJSON event shapes', () => {
   const evs = [];
@@ -228,6 +232,18 @@ test('pi: parser reads the verified NDJSON event shapes', () => {
 test('pi: stale session detection', () => {
   assert.ok(pi.isSessionGone('Error: session abc not found', 1));
   assert.ok(!pi.isSessionGone('session not found', 0));
+});
+test('pi: /model pins DeepSeek V4.1 Flash under opencode-go only', () => {
+  const ids = pi.models;
+  assert.ok(ids.includes('opencode-go/deepseek-v4.1-flash'), ids.join(' '));
+  // The DeepSeek platform's alias for the same model is deliberately absent:
+  // one model, one button, and it has to carry the provider prefix.
+  assert.ok(!ids.includes('deepseek/deepseek-flash'), 'the platform alias must not be pinned');
+  assert.deepStrictEqual(ids.filter((m) => /v4\.1|deepseek-flash/.test(m)),
+    ['opencode-go/deepseek-v4.1-flash'], 'only one v4.1 Flash pin');
+  assert.strictEqual(new Set(ids).size, ids.length, 'duplicate pin');
+  assert.deepStrictEqual(ids.filter((m) => m !== 'adaptive' && !m.includes('/')), [],
+    'every real pin must be provider-qualified');
 });
 
 // ------------------------------------------------------------- antigravity ---

@@ -1015,7 +1015,14 @@ function modelKeyboard(b, current) {
   // Short ids (Claude: sonnet, opus, ...) fit on one row; provider-qualified
   // ones (openrouter/google/gemini-3.7-flash) need a row each to stay readable
   // on a phone. The label drops the provider prefix, the callback keeps the id.
-  const label = (m) => (m.includes('/') ? m.slice(m.indexOf('/') + 1) : m);
+  const short = (m) => (m.includes('/') ? m.slice(m.indexOf('/') + 1) : m);
+  // ...except when two providers pin the same id (deepseek/deepseek-v4-pro vs
+  // opencode-go/deepseek-v4-pro): then the prefix is the only way to tell the
+  // buttons apart, so keep it on both.
+  const seen = new Set();
+  const dup = new Set();
+  for (const m of b.models) (seen.has(short(m)) ? dup : seen).add(short(m));
+  const label = (m) => (dup.has(short(m)) ? m : short(m));
   const wide = b.models.some((m) => label(m).length > 12);
   const buttons = b.models.map((m) => ({
     text: (m === current ? '● ' : '') + label(m),
