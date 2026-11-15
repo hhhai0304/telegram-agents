@@ -202,12 +202,14 @@ module.exports = {
   wakeSent: (name, mac) => `Magic packet sent to ${name} (${mac}). Give it ~30s to boot.`,
   wakeFailed: (name, err) => `Waking ${name} failed: ${err}`,
 
-  // PC displays + ambilight (/monitor_on, /monitor_off)
-  monitorNone: 'No display-control host configured (TGA_MONITOR_SSH).',
-  monitorFailed: (err) => `Monitor command failed: ${err}`,
-  monitorDone: (on, state) => state
-    ? `Displays + ambilight: ${state === 'on' ? 'ON' : 'OFF'}.`
-    : `${on ? 'On' : 'Off'} command sent — could not read the state back.`,
+  // Screen mode (/screen_on, /screen_off) — HA scripts, plug + VDD state
+  screenNone: 'Home Assistant is not configured (TGA_HA_URL / TGA_HA_TOKEN).',
+  screenFailed: (err) => `Screen command failed: ${err}`,
+  screenDone: (on, main, side) => {
+    const label = (s) => (s === 'on' ? 'ON' : s === 'off' ? 'off' : 'unknown');
+    return `Main screen: ${label(main)} · side: ${label(side)}\n`
+      + (on ? 'The virtual display is disabled ~12s later (desk layout is back).' : 'The virtual display is up ~3s later — remote works now.');
+  },
 
   menuCommands: [
     ['agent', 'Switch coding agent'],

@@ -952,16 +952,25 @@ const WAKE_DEVICES = (env('WAKE_DEVICES', '') || '')
   .filter(Boolean);
 const WAKE_MENU = WAKE_DEVICES.length ? [['wake', `Wake máy: ${WAKE_DEVICES.map((d) => d.name).join(', ')}`]] : [];
 
-// TGA_MONITOR_SSH: ssh host alias of the PC whose displays + ambilight
-// are toggled by the scheduled tasks MonitorPower-On / MonitorPower-Off.
-// Empty = the /monitor_* commands stay hidden.
+// TGA_MONITOR_SSH: ssh host alias of the PC (used by /boot_windows//boot_linux).
 const MONITOR_SSH = env('MONITOR_SSH', '');
-const MONITOR_MENU = MONITOR_SSH ? [
-  ['monitor_on', 'Bật màn hình PC + LED'],
-  ['monitor_off', 'Tắt màn hình PC + LED'],
-  ['boot_windows', 'Reboot PC một lần vào Windows'],
-  ['boot_linux', 'Reboot PC một lần vào Linux'],
-] : [];
+// The two monitor plugs live in Home Assistant, and the PC's virtual display
+// follows their state there, so the screen commands are HA script calls and not
+// another ssh path: one source of truth for "the desk is remote".
+// TGA_HA_URL + TGA_HA_TOKEN empty = /screen_* stays hidden.
+const HA_URL = env('HA_URL', '').replace(/\/+$/, '');
+const HA_TOKEN = env('HA_TOKEN', '');
+const SCREEN_CMD = Boolean(HA_URL && HA_TOKEN);
+const MONITOR_MENU = [
+  ...(SCREEN_CMD ? [
+    ['screen_on', 'Bật 2 màn hình (về desk)'],
+    ['screen_off', 'Tắt 2 màn hình + bật màn hình ảo'],
+  ] : []),
+  ...(MONITOR_SSH ? [
+    ['boot_windows', 'Reboot PC một lần vào Windows'],
+    ['boot_linux', 'Reboot PC một lần vào Linux'],
+  ] : []),
+];
 
 const HELP = S.help(GUARD_MODE === 'none', AGENT_IDS.map((id) => backends.byId[id].name))
   + (MONEY_DIR ? [
@@ -982,13 +991,17 @@ const HELP = S.help(GUARD_MODE === 'none', AGENT_IDS.map((id) => backends.byId[i
     '/wake — danh sách máy, bấm nút để wake (chỉ 1 máy thì wake luôn)',
     '/wake <tên> — wake máy theo tên',
   ].join('\n') : '')
-  + (MONITOR_SSH ? [
+  + (MONITOR_MENU.length ? [
     '', '',
     '🖥️ Màn hình PC',
-    '/monitor_on (= /monitor-on) — bật 2 màn hình + ambilight',
-    '/monitor_off (= /monitor-off) — tắt cả hai',
-    '/boot_windows — reboot PC một lần vào Windows',
-    '/boot_linux — reboot PC một lần vào Linux',
+    ...(SCREEN_CMD ? [
+      '/screen_off — tắt 2 màn hình (cắt 2 ổ Tuya), bật màn hình ảo cho remote',
+      '/screen_on — bật lại 2 màn hình, tắt màn hình ảo',
+    ] : []),
+    ...(MONITOR_SSH ? [
+      '/boot_windows — reboot PC một lần vào Windows',
+      '/boot_linux — reboot PC một lần vào Linux',
+    ] : []),
   ].join('\n') : '');
 
 function agentKeyboard(cs) {
@@ -1156,6 +1169,7 @@ async function wakeDevice(key, d) {
 }
 
 function sshMonitor(remoteCmd) {
+  if (!MONITOR_SSH) return Promise.resolve({ ok: false, out: '', err: 'TGA_MONITOR_SSH is not set' });
   return new Promise((resolve) => {
     execFile('ssh', [MONITOR_SSH, remoteCmd], { timeout: 30000, maxBuffer: 1 << 20 },
       (err, stdout, stderr) => resolve({
@@ -1166,20 +1180,55 @@ function sshMonitor(remoteCmd) {
   });
 }
 
-// The PC is Windows 11 again (since 2026-10-19): its display/ambilight logic
-// lives in C:\Tools\*.ps1 and is reached over SSH with PowerShell. Git Bash is
-// NOT usable in an sshd session (HOME arrives mangled as "C:Usershhhai").
+// The PC is Windows 11 again (since 2026-10-19): its OS-switch script lives in
+// C:\Tools and is reached over SSH with PowerShell. Git Bash is NOT usable in
+// an sshd session (HOME arrives mangled as "C:Usershhhai").
 const PC_PS = (script, args = '') => `powershell -NoProfile -ExecutionPolicy Bypass -File C:/Tools/${script}${args}`;
 
-async function monitorToggle(key, on) {
-  const run = await sshMonitor(PC_PS(on ? 'Monitors-On.ps1' : 'Monitors-Off.ps1'));
-  if (!run.ok) { await send(key, S.monitorFailed(run.err || run.out || 'ssh')); return; }
-  // kscreen-doctor DPMS settles in ~1-2 s; the settle wait also gives the
-  // HyperHDR JSON-RPC LEDDEVICE call inside the script time to land.
-  await new Promise((r) => setTimeout(r, 6000));
-  const st = await sshMonitor(PC_PS('Get-MonitorState.ps1'));
-  const state = st.ok && /^(on|off)$/i.test(st.out) ? st.out.toLowerCase() : null;
-  await send(key, S.monitorDone(on, state));
+/** HA REST call with a hard timeout (the screen scripts can block ~40 s). */
+async function haCall(path, body) {
+  const res = await fetch(`${HA_URL}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+    signal: AbortSignal.timeout(150000),
+  });
+  return { ok: res.ok, status: res.status, text: (await res.text()).slice(0, 300) };
+}
+
+async function haState(entityId) {
+  try {
+    const res = await fetch(`${HA_URL}/api/states/${entityId}`, {
+      headers: { Authorization: `Bearer ${HA_TOKEN}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    return res.ok ? (await res.json()).state : null;
+  } catch { return null; }
+}
+
+/**
+ * "Screens off/on" is one HA script pair: it flips the two Tuya plugs and an
+ * HA automation drives the PC's virtual display from that state (VDD on when
+ * both panels are off, desk layout back + VDD off when one returns).
+ */
+async function screenMode(key, on) {
+  if (!SCREEN_CMD) { await send(key, S.screenNone); return; }
+  try {
+    const r = await haCall('/api/services/script/turn_on', {
+      entity_id: on ? 'script.screen_on' : 'script.screen_off',
+    });
+    if (!r.ok) { await send(key, S.screenFailed(`${r.status} ${r.text}`)); return; }
+  } catch (e) {
+    await send(key, S.screenFailed(e.message));
+    return;
+  }
+  // The plugs acknowledge in ~1 s; the VDD switch follows a few seconds later.
+  await new Promise((r) => setTimeout(r, 4000));
+  const [main, side] = await Promise.all([
+    haState('switch.man_hinh_chinh'),
+    haState('switch.man_hinh_phu'),
+  ]);
+  await send(key, S.screenDone(on, main, side));
 }
 
 // One-shot OS switch on the dual-boot PC. Linux runs ~/bin/boot-windows.sh
@@ -1464,10 +1513,9 @@ async function handleCommand(chatId, text) {
 
     // Telegram command names may only contain [a-z0-9_]; the hyphen spellings
     // still work when typed, they just cannot be registered in the bot menu.
-    case '/monitor-on': case '/monitor_on':
-    case '/monitor-off': case '/monitor_off': {
-      if (!MONITOR_SSH) { await send(chatId, S.monitorNone); return true; }
-      await monitorToggle(chatId, cmd.endsWith('on'));
+    case '/screen-on': case '/screen_on':
+    case '/screen-off': case '/screen_off': {
+      await screenMode(chatId, cmd.endsWith('on'));
       return true;
     }
 

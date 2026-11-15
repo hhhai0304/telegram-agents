@@ -182,12 +182,14 @@ module.exports = {
   wakeSent: (name, mac) => `Đã gửi magic packet tới ${name} (${mac}). Chờ ~30s máy mới lên được.`,
   wakeFailed: (name, err) => `Wake ${name} thất bại: ${err}`,
 
-  // PC displays + ambilight (/monitor_on, /monitor_off)
-  monitorNone: 'Chưa cấu hình máy điều khiển màn hình (TGA_MONITOR_SSH).',
-  monitorFailed: (err) => `Lệnh màn hình thất bại: ${err}`,
-  monitorDone: (on, state) => state
-    ? `Màn hình + ambilight: ${state === 'on' ? 'đang BẬT' : 'đã TẮT'}.`
-    : `Đã gửi lệnh ${on ? 'bật' : 'tắt'} — không đọc lại được trạng thái.`,
+  // Screen mode (/screen_on, /screen_off) — HA scripts, plug + VDD state
+  screenNone: 'Chưa cấu hình Home Assistant (TGA_HA_URL / TGA_HA_TOKEN).',
+  screenFailed: (err) => `Lệnh màn hình thất bại: ${err}`,
+  screenDone: (on, main, side) => {
+    const label = (s) => (s === 'on' ? 'BẬT' : s === 'off' ? 'tắt' : 'không rõ');
+    return `Màn hình chính: ${label(main)} · phụ: ${label(side)}\n`
+      + (on ? 'Màn hình ảo sẽ tắt sau ~12s (desk layout trở lại).' : 'Màn hình ảo bật sau ~3s — remote dùng được rồi.');
+  },
 
   menuCommands: [
     ['agent', 'Chuyển agent'],
